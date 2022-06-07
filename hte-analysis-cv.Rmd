@@ -1,0 +1,264 @@
+---
+title: 'COVID STEROID 2: HTE Analysis'
+author: "Bryan Blette"
+date: '2022-06-07'
+output: pdf_document
+---
+
+## Analysis
+
+First the required R packages are loaded, as well as the data set.
+
+```{r message=FALSE}
+rm(list = ls())
+library(BART)
+library(caret)
+library(rpart)
+library(rpart.plot)
+
+# Load data from appropriate directory (edit as needed)
+dat <- read.csv2("~/Downloads/synth_covid.csv")
+```
+
+Next we do a small amount of data cleaning/preparation.
+
+```{r}
+# Clean up data variables types and remove the small amount of missing data
+dat$resp_sup <- as.factor(dat$resp_sup)
+dat$dead90 <- ifelse(dat$dead90 == TRUE, 1, 0)
+dat <- dat[complete.cases(dat), ]
+
+# Standardize continuous covariates
+dat$age <- (dat$age - mean(dat$age)) / sd(dat$age)
+dat$BL9_Weight <- (dat$BL9_Weight - mean(dat$BL9_Weight)) / sd(dat$BL9_Weight)
+
+# Make datasets under each counterfactual
+dat1 <- dat0 <- dat
+dat1$allocation <- TRUE
+dat0$allocation <- FALSE
+```
+
+Then we run a BART analysis focused on the binary mortality outcome.
+
+```{r results=FALSE}
+# Create 10 folds of the data set for cross-validation
+set.seed(60622)
+folds <- createFolds(dat$dead90, k = 10, list = TRUE, returnTrain = FALSE)
+
+# Initialize output matrices for prediction error from each model
+cvoutput <- expand.grid(1:3, c(0.25, 0.5, 0.95), c(50, 200, 400), NA)
+colnames(cvoutput) <- c("Power", "Base", "Ntrees", "CVMSE")
+mse <- array(NA, dim = c(27, 10))
+
+# Perform cross validation (may take >2 hours)
+for (hp in 1:27) {
+  
+  for (i in 1:10) {
+        
+    # BART model
+    bartmod <- lbart(x.train = dat[-folds[[i]], c(1, 4:13)],
+                     y.train = dat$dead90[-folds[[i]]],
+                     x.test = dat[folds[[i]], c(1, 4:13)],
+                     power = cvoutput$Power[hp], base = cvoutput$Base[hp],
+                     ntree = cvoutput$Ntrees[hp])
+    pred <- exp(colMeans(bartmod$yhat.test)) /
+            (1 + exp(colMeans(bartmod$yhat.test)))
+    mse[hp, i] <- mean((dat$dead90[folds[[i]]] - pred)^2)
+        
+  }
+  
+}
+
+# Calculate 10-fold CV error for each hyperparameter combination
+cvoutput$CVMSE <- rowMeans(mse)
+
+# Fit final model under hyperparameters with minimum CV error
+set.seed(60622)
+bartmod1 <- lbart(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
+                  x.test = dat1[, c(1, 4:13)],
+                  power = cvoutput$Power[which.min(cvoutput$CVMSE)],
+                  base = cvoutput$Base[which.min(cvoutput$CVMSE)],
+                  ntree = cvoutput$Ntrees[which.min(cvoutput$CVMSE)])
+bartmod0 <- lbart(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
+                  x.test = dat0[, c(1, 4:13)],
+                  power = cvoutput$Power[which.min(cvoutput$CVMSE)],
+                  base = cvoutput$Base[which.min(cvoutput$CVMSE)],
+                  ntree = cvoutput$Ntrees[which.min(cvoutput$CVMSE)])
+```
+
+Then conditional average treatment effects are estimated using add math.
+
+```{r}
+dat$cate <-
+  exp(colMeans(bartmod1$yhat.test)) / (1 + exp(colMeans(bartmod1$yhat.test))) -
+  exp(colMeans(bartmod0$yhat.test)) / (1 + exp(colMeans(bartmod0$yhat.test)))
+```
+
+This full process is then repeated for the continuous outcome (days alive without life support by day 90).
+
+```{r results=FALSE}
+# Initialize output for prediction error from each model
+cvoutput$CVMSE_c <- NA
+mse_c <- array(NA, dim = c(27, 10))
+
+# Perform cross validation (should take much less time than the binary outcome)
+set.seed(60622)
+for (hp in 1:27) {
+  
+  for (i in 1:10) {
+        
+    # BART model
+    bartmod_c <- wbart(x.train = dat[-folds[[i]], c(1, 4:13)],
+                       y.train = dat$dawols90[-folds[[i]]],
+                       x.test = dat[folds[[i]], c(1, 4:13)],
+                       power = cvoutput$Power[hp], base = cvoutput$Base[hp],
+                       ntree = cvoutput$Ntrees[hp])
+    pred_c <- colMeans(bartmod_c$yhat.test)
+    mse_c[hp, i] <- mean((dat$dawols90[folds[[i]]] - pred_c)^2)
+        
+  }
+  
+}
+
+# Calculate 10-fold CV error for each hyperparameter combination
+cvoutput$CVMSE_c <- rowMeans(mse_c)
+
+# Fit final models under hyperparameters with minimum CV error
+set.seed(60622)
+bartmod1_c <- wbart(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
+                    x.test = dat1[, c(1, 4:13)],
+                    power = cvoutput$Power[which.min(cvoutput$CVMSE_c)],
+                    base = cvoutput$Base[which.min(cvoutput$CVMSE_c)],
+                    ntree = cvoutput$Ntrees[which.min(cvoutput$CVMSE_c)])
+bartmod0_c <- wbart(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
+                    x.test = dat0[, c(1, 4:13)],
+                    power = cvoutput$Power[which.min(cvoutput$CVMSE_c)],
+                    base = cvoutput$Base[which.min(cvoutput$CVMSE_c)],
+                    ntree = cvoutput$Ntrees[which.min(cvoutput$CVMSE_c)])
+
+# Estimate CATEs
+dat$cate_c <- colMeans(bartmod1_c$yhat.test) - colMeans(bartmod0_c$yhat.test)
+```
+
+Finally, the "fit-the-fit" approach is used to find subgroups exhibiting heterogeneity of treatment effect, starting with the binary outcome. In particular, a CART model is fit with the CATE for 90-day mortality as the outcome and the covariates as possible predictors. The model is first fit under default CART hyperparameter settings.
+
+```{r}
+# CART model for 90 day mortality with default CART hyperparameter and
+# all covariates considered
+cartmod <- rpart(cate ~ ., data = dat[, c(4:14)], method = "anova")
+rpart.plot(cartmod)
+```
+
+Now we prune the tree for interpretability using the stepwise approach of Hu et al. In particular, covariates are added to the CART model sequentially according to greatest increase in model $R^{2}$ until an increase of less than 1% occurs.
+
+```{r results=FALSE}
+# Pruned tree using stepwise approach of Hu et al.
+r2 <- c()
+covar_include <- c()
+covar_cols <- 4:13
+currentr2 <- 0
+maxcovars <- 4
+
+for (numcovars in 1:maxcovars) {
+  
+  for (covar in covar_cols) {
+    cartmod <- rpart(cate ~ ., data = dat[, c(covar, covar_include, 14)],
+                     method = "anova")
+    r2[which(covar_cols == covar)] <-
+      1 - printcp(cartmod)[dim(printcp(cartmod))[1], 3]
+  }
+  
+  if ((max(r2) - currentr2) / currentr2 > 0.01) {
+    covar_include <- c(covar_include, covar_cols[which.max(r2)])
+    covar_cols <- covar_cols[covar_cols != covar_cols[which.max(r2)]]
+    currentr2 <- max(r2)
+    r2 <- c()
+  } else {
+    break
+  }
+  
+}
+```
+
+Print out the number of covariates selected and the resulting CART model output.
+
+```{r}
+print("Number of covariates:")
+print(numcovars - 1)
+cartmod <- rpart(cate ~ ., data = dat[, c(covar_include, 14)],
+                     method = "anova")
+rpart.plot(cartmod)
+```
+
+Finally we explore further pruning:
+
+```{r}
+printcp(cartmod)
+prunedtree <-
+  prune(cartmod,
+        cp = cartmod$cptable[which.min(cartmod$cptable[, "xerror"]), "CP"])
+rpart.plot(prunedtree)
+```
+
+Next the same fit-the-fit approach is used to summarize the results for the continuous outcome, starting with a CART model using all covariates and default hyperparameter.
+
+```{r}
+# CART model for 90 day mortality with default CART hyperparameter and
+# all covariates considered
+cartmod <- rpart(cate_c ~ ., data = dat[, c(4:13, 15)], method = "anova")
+rpart.plot(cartmod)
+```
+
+Now we prune the tree for interpretability using the stepwise approach of Hu et al.
+
+```{r results=FALSE}
+# Pruned tree using stepwise approach of Hu et al.
+r2 <- c()
+covar_include <- c()
+covar_cols <- 4:13
+currentr2 <- 0
+maxcovars <- 4
+
+for (numcovars in 1:maxcovars) {
+  
+  for (covar in covar_cols) {
+    cartmod <- rpart(cate_c ~ ., data = dat[, c(covar, covar_include, 15)],
+                     method = "anova")
+    r2[which(covar_cols == covar)] <-
+      1 - printcp(cartmod)[dim(printcp(cartmod))[1], 3]
+  }
+  
+  if ((max(r2) - currentr2) / currentr2 > 0.01) {
+    covar_include <- c(covar_include, covar_cols[which.max(r2)])
+    covar_cols <- covar_cols[covar_cols != covar_cols[which.max(r2)]]
+    currentr2 <- max(r2)
+    r2 <- c()
+  } else {
+    break
+  }
+  
+}
+```
+
+Print out the number of covariates selected and the resulting CART model output.
+
+```{r}
+print("Number of covariates:")
+print(numcovars - 1)
+cartmod <- rpart(cate_c ~ ., data = dat[, c(covar_include, 15)],
+                     method = "anova")
+rpart.plot(cartmod)
+```
+
+Finally we explore further pruning:
+
+```{r}
+printcp(cartmod)
+prunedtree <-
+  prune(cartmod,
+        cp = cartmod$cptable[which.min(cartmod$cptable[, "xerror"]), "CP"])
+rpart.plot(prunedtree)
+```
+
+Further (non-automated) pruning may need to be considered here for trees that remain too large to easily interpret.
+
