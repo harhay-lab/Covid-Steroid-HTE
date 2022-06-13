@@ -5,7 +5,7 @@ output: pdf_document
 
 ## Analysis
 
-First the required R packages are loaded, as well as the data set.
+First the required R packages are loaded, as well as the data set. We also source a couple of functions to allow for running BART models with multiple MCMC chains (without needing multiple cores).
 
 ```{r message=FALSE}
 rm(list = ls())
@@ -13,6 +13,7 @@ library(BART)
 library(caret)
 library(rpart)
 library(rpart.plot)
+source("chainfunctions.R")
 
 # Load data from appropriate directory (edit as needed)
 dat <- read.csv2("~/Downloads/synth_covid.csv")
@@ -41,18 +42,26 @@ Then we run a BART analysis focused on the binary mortality outcome.
 ```{r results=FALSE}
 # Fit BART models under default hyperparameters, get predictions under each trt
 set.seed(60622)
-bartmod1 <- mc.lbart(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
-                     x.test = dat1[, c(1, 4:13)], mc.cores = 4, ndpost = 4000)
-bartmod0 <- mc.lbart(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
-                     x.test = dat0[, c(1, 4:13)], mc.cores = 4, ndpost = 4000)
+bartmod1 <- lbart.chained(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
+                          x.test = dat1[, c(1, 4:13)], nchains = 4)
+bartmod0 <- lbart.chained(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
+                          x.test = dat0[, c(1, 4:13)], nchains = 4)
+
+# Collapse predictions across chains for certain calculations
+bartmod1$yhat.train.collapse <- apply(bartmod1$yhat.train, 2, rbind)
+bartmod1$yhat.test.collapse <- apply(bartmod1$yhat.test, 2, rbind)
+bartmod0$yhat.train.collapse <- apply(bartmod0$yhat.train, 2, rbind)
+bartmod0$yhat.test.collapse <- apply(bartmod0$yhat.test, 2, rbind)
 ```
 
-Then conditional average treatment effects are estimated using add math.
+Then conditional average treatment effects are estimated using the predictions under each counterfactual.
 
 ```{r}
 dat$cate <-
-  exp(colMeans(bartmod1$yhat.test)) / (1 + exp(colMeans(bartmod1$yhat.test))) -
-  exp(colMeans(bartmod0$yhat.test)) / (1 + exp(colMeans(bartmod0$yhat.test)))
+  exp(colMeans(bartmod1$yhat.test.collapse)) /
+    (1 + exp(colMeans(bartmod1$yhat.test.collapse))) -
+  exp(colMeans(bartmod0$yhat.test.collapse)) /
+    (1 + exp(colMeans(bartmod0$yhat.test.collapse)))
 ```
 
 This full process is then repeated for the continuous outcome (days alive without life support by day 90).
@@ -60,15 +69,22 @@ This full process is then repeated for the continuous outcome (days alive withou
 ```{r results=FALSE}
 # Fit BART models under default hyperparameters, get predictions under each trt
 set.seed(60622)
-bartmod1_c <- mc.wbart(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
-                       x.test = dat1[, c(1, 4:13)], mc.cores = 4,
-                       ndpost = 4000)
-bartmod0_c <- mc.wbart(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
-                       x.test = dat0[, c(1, 4:13)], mc.cores = 4,
-                       ndpost = 4000)
+bartmod1_c <- wbart.chained(x.train = dat[, c(1, 4:13)],
+                            y.train = dat$dawols90,
+                            x.test = dat1[, c(1, 4:13)], nchains = 4)
+bartmod0_c <- wbart.chained(x.train = dat[, c(1, 4:13)],
+                            y.train = dat$dawols90,
+                            x.test = dat0[, c(1, 4:13)], nchains = 4)
+
+# Collapse predictions across chains for certain calculations
+bartmod1_c$yhat.train.collapse <- apply(bartmod1_c$yhat.train, 2, rbind)
+bartmod1_c$yhat.test.collapse <- apply(bartmod1_c$yhat.test, 2, rbind)
+bartmod0_c$yhat.train.collapse <- apply(bartmod0_c$yhat.train, 2, rbind)
+bartmod0_c$yhat.test.collapse <- apply(bartmod0_c$yhat.test, 2, rbind)
 
 # Estimate CATEs
-dat$cate_c <- colMeans(bartmod1_c$yhat.test) - colMeans(bartmod0_c$yhat.test)
+dat$cate_c <- colMeans(bartmod1_c$yhat.test.collapse) -
+              colMeans(bartmod0_c$yhat.test.collapse)
 ```
 
 Finally, the "fit-the-fit" approach is used to find subgroups exhibiting heterogeneity of treatment effect, starting with the binary outcome. In particular, a CART model is fit with the CATE for 90-day mortality as the outcome and the covariates as possible predictors. The model is first fit under default CART hyperparameter settings.
@@ -200,13 +216,13 @@ Next we run standard diagnostics for each of the models. We begin with diagnosti
 ```{r}
 # MCMC chains for parameter in models of continuous outcome
 par(mfrow = c(2, 2))
-plot(bartmod0_c$sigma[, 1], type = "l")
+plot(bartmod0_c$sigma[, 1], type = "l", ylab = "First MCMC Chain")
 abline(v = 100, lwd = 2, col = "red")
-plot(bartmod0_c$sigma[, 2], type = "l")
+plot(bartmod0_c$sigma[, 2], type = "l", ylab = "Second MCMC Chain")
 abline(v = 100, lwd = 2, col = "red")
-plot(bartmod0_c$sigma[, 3], type = "l")
+plot(bartmod0_c$sigma[, 3], type = "l", ylab = "Third MCMC Chain")
 abline(v = 100, lwd = 2, col = "red")
-plot(bartmod0_c$sigma[, 4], type = "l")
+plot(bartmod0_c$sigma[, 4], type = "l", ylab = "Fourth MCMC Chain")
 abline(v = 100, lwd = 2, col = "red")
 
 plot(bartmod1_c$sigma[, 1], type = "l", ylab = "First MCMC Chain")
@@ -219,13 +235,64 @@ plot(bartmod1_c$sigma[, 4], type = "l", ylab = "Fourth MCMC Chain")
 abline(v = 100, lwd = 2, col = "red")
 ```
 
-One should check that each chain has converged after burn-in (designated by the vertical red lines).
+One should check that each chain has converged after burn-in (designated by the vertical red lines). In general, the chains should be converging to approximately the same value.
 
 Next consider diagnostics for the models with the binary mortality outcome as described in Sparapani (2021). First consider the autocorrelation of the estimated response surface from BART from 10 randomly selected subjects. This may start somewhat correlated for nearby observations, but should reduce to 0 correlation for observations further apart.
 
 ```{r}
-# First for bartmod0
-auto.corr <- acf(bartmod0$yhat.train[ , sample(1:dim(dat)[1], 10)], plot=FALSE)
+# First for bartmod0, one panel for each chain
+par(mfrow = c(2, 2))
+
+auto.corr <- acf(bartmod0$yhat.train[ , sample(1:dim(dat)[1], 10), 1],
+                 plot = FALSE)
+max.lag <- max(auto.corr$lag[ , 1, 1])
+
+j <- seq(-0.5, 0.4, length.out = 10)
+for (h in 1:10) {
+  if (h == 1) {
+    plot(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+         type = 'h', xlim = c(0, max.lag + 1), ylim = c(-1, 1),
+         ylab = 'acf', xlab = 'lag')
+  } else {
+    lines(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+          type = 'h', col = h)
+  }
+}
+
+auto.corr <- acf(bartmod0$yhat.train[ , sample(1:dim(dat)[1], 10), 2],
+                 plot = FALSE)
+max.lag <- max(auto.corr$lag[ , 1, 1])
+
+j <- seq(-0.5, 0.4, length.out = 10)
+for (h in 1:10) {
+  if (h == 1) {
+    plot(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+         type = 'h', xlim = c(0, max.lag + 1), ylim = c(-1, 1),
+         ylab = 'acf', xlab = 'lag')
+  } else {
+    lines(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+          type = 'h', col = h)
+  }
+}
+
+auto.corr <- acf(bartmod0$yhat.train[ , sample(1:dim(dat)[1], 10), 3],
+                 plot = FALSE)
+max.lag <- max(auto.corr$lag[ , 1, 1])
+
+j <- seq(-0.5, 0.4, length.out = 10)
+for (h in 1:10) {
+  if (h == 1) {
+    plot(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+         type = 'h', xlim = c(0, max.lag + 1), ylim = c(-1, 1),
+         ylab = 'acf', xlab = 'lag')
+  } else {
+    lines(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+          type = 'h', col = h)
+  }
+}
+
+auto.corr <- acf(bartmod0$yhat.train[ , sample(1:dim(dat)[1], 10), 4],
+                 plot = FALSE)
 max.lag <- max(auto.corr$lag[ , 1, 1])
 
 j <- seq(-0.5, 0.4, length.out = 10)
@@ -241,7 +308,56 @@ for (h in 1:10) {
 }
 
 # Then for bartmod1
-auto.corr <- acf(bartmod1$yhat.train[ , sample(1:dim(dat)[1], 10)], plot=FALSE)
+auto.corr <- acf(bartmod1$yhat.train[ , sample(1:dim(dat)[1], 10), 1],
+                 plot = FALSE)
+max.lag <- max(auto.corr$lag[ , 1, 1])
+
+j <- seq(-0.5, 0.4, length.out = 10)
+for (h in 1:10) {
+  if (h == 1) {
+    plot(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+         type = 'h', xlim = c(0, max.lag + 1), ylim = c(-1, 1),
+         ylab = 'acf', xlab = 'lag')
+  } else {
+    lines(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+          type = 'h', col = h)
+  }
+}
+
+auto.corr <- acf(bartmod1$yhat.train[ , sample(1:dim(dat)[1], 10), 2],
+                 plot = FALSE)
+max.lag <- max(auto.corr$lag[ , 1, 1])
+
+j <- seq(-0.5, 0.4, length.out = 10)
+for (h in 1:10) {
+  if (h == 1) {
+    plot(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+         type = 'h', xlim = c(0, max.lag + 1), ylim = c(-1, 1),
+         ylab = 'acf', xlab = 'lag')
+  } else {
+    lines(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+          type = 'h', col = h)
+  }
+}
+
+auto.corr <- acf(bartmod1$yhat.train[ , sample(1:dim(dat)[1], 10), 3],
+                 plot = FALSE)
+max.lag <- max(auto.corr$lag[ , 1, 1])
+
+j <- seq(-0.5, 0.4, length.out = 10)
+for (h in 1:10) {
+  if (h == 1) {
+    plot(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+         type = 'h', xlim = c(0, max.lag + 1), ylim = c(-1, 1),
+         ylab = 'acf', xlab = 'lag')
+  } else {
+    lines(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+          type = 'h', col = h)
+  }
+}
+
+auto.corr <- acf(bartmod1$yhat.train[ , sample(1:dim(dat)[1], 10), 4],
+                 plot = FALSE)
 max.lag <- max(auto.corr$lag[ , 1, 1])
 
 j <- seq(-0.5, 0.4, length.out = 10)
@@ -260,7 +376,7 @@ Next, we plot the Geweke Z statistics for each individual, which should be appro
 
 ```{r}
 # First for bartmod0
-geweke <- gewekediag(bartmod0$yhat.train)
+geweke <- gewekediag(bartmod0$yhat.train.collapse)
 n <- dim(dat)[1]
 j <- -10^(log10(n) - 1)
 plot(geweke$z, pch = '.', cex = 2, ylab = 'z', xlab = 'i',
@@ -282,7 +398,7 @@ text(c(1, 1), c(-3.891, 3.891), pos=2, cex=0.6, labels='0.9999')
 text(c(1, 1), c(-4.417, 4.417), pos=2, cex=0.6, labels='0.99999')
 
 # Then for bartmod1
-geweke <- gewekediag(bartmod1$yhat.train)
+geweke <- gewekediag(bartmod1$yhat.train.collapse)
 plot(geweke$z, pch = '.', cex = 2, ylab = 'z', xlab = 'i',
      xlim=c(j, n), ylim=c(-5, 5))
 lines(1:n, rep(-1.96, n), type='l', col=6)
@@ -301,6 +417,7 @@ text(c(1, 1), c(-3.291, 3.291), pos=2, cex=0.6, labels='0.999')
 text(c(1, 1), c(-3.891, 3.891), pos=2, cex=0.6, labels='0.9999')
 text(c(1, 1), c(-4.417, 4.417), pos=2, cex=0.6, labels='0.99999')
 ```
+
 If several points lie beyond the dark blue line or further, consider using more thinning when fitting the models.
 
 ## Sensitivity analysis
@@ -319,6 +436,7 @@ library(BART)
 library(caret)
 library(rpart)
 library(rpart.plot)
+source("chainfunctions.R")
 
 # Load data from appropriate directory (edit as needed)
 dat <- read.csv2("~/Downloads/synth_covid.csv")
@@ -350,18 +468,26 @@ Then we run a BART analysis focused on the binary mortality outcome.
 ```{r results=FALSE}
 # Fit BART models under default hyperparameters, get predictions under each trt
 set.seed(60622)
-bartmod1 <- mc.lbart(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
-                     x.test = dat1[, c(1, 4:13)], mc.cores = 4, ndpost = 4000)
-bartmod0 <- mc.lbart(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
-                     x.test = dat0[, c(1, 4:13)], mc.cores = 4, ndpost = 4000)
+bartmod1 <- lbart.chained(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
+                          x.test = dat1[, c(1, 4:13)], nchains = 4)
+bartmod0 <- lbart.chained(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
+                          x.test = dat0[, c(1, 4:13)], nchains = 4)
+
+# Collapse predictions across chains for certain calculations
+bartmod1$yhat.train.collapse <- apply(bartmod1$yhat.train, 2, rbind)
+bartmod1$yhat.test.collapse <- apply(bartmod1$yhat.test, 2, rbind)
+bartmod0$yhat.train.collapse <- apply(bartmod0$yhat.train, 2, rbind)
+bartmod0$yhat.test.collapse <- apply(bartmod0$yhat.test, 2, rbind)
 ```
 
-Then conditional average treatment effects are estimated using add math.
+Then conditional average treatment effects are estimated using predictions under each counterfactual.
 
 ```{r}
 dat$cate <-
-  exp(colMeans(bartmod1$yhat.test)) / (1 + exp(colMeans(bartmod1$yhat.test))) -
-  exp(colMeans(bartmod0$yhat.test)) / (1 + exp(colMeans(bartmod0$yhat.test)))
+  exp(colMeans(bartmod1$yhat.test.collapse)) /
+    (1 + exp(colMeans(bartmod1$yhat.test.collapse))) -
+  exp(colMeans(bartmod0$yhat.test.collapse)) /
+    (1 + exp(colMeans(bartmod0$yhat.test.collapse)))
 ```
 
 This full process is then repeated for the continuous outcome (days alive without life support by day 90).
@@ -369,15 +495,22 @@ This full process is then repeated for the continuous outcome (days alive withou
 ```{r results=FALSE}
 # Fit BART models under default hyperparameters, get predictions under each trt
 set.seed(60622)
-bartmod1_c <- mc.wbart(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
-                       x.test = dat1[, c(1, 4:13)], mc.cores = 4,
-                       ndpost = 4000)
-bartmod0_c <- mc.wbart(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
-                       x.test = dat0[, c(1, 4:13)], mc.cores = 4,
-                       ndpost = 4000)
+bartmod1_c <- wbart.chained(x.train = dat[, c(1, 4:13)],
+                            y.train = dat$dawols90,
+                            x.test = dat1[, c(1, 4:13)], nchains = 4)
+bartmod0_c <- wbart.chained(x.train = dat[, c(1, 4:13)],
+                            y.train = dat$dawols90,
+                            x.test = dat0[, c(1, 4:13)], nchains = 4)
+
+# Collapse predictions across chains for certain calculations
+bartmod1_c$yhat.train.collapse <- apply(bartmod1_c$yhat.train, 2, rbind)
+bartmod1_c$yhat.test.collapse <- apply(bartmod1_c$yhat.test, 2, rbind)
+bartmod0_c$yhat.train.collapse <- apply(bartmod0_c$yhat.train, 2, rbind)
+bartmod0_c$yhat.test.collapse <- apply(bartmod0_c$yhat.test, 2, rbind)
 
 # Estimate CATEs
-dat$cate_c <- colMeans(bartmod1_c$yhat.test) - colMeans(bartmod0_c$yhat.test)
+dat$cate_c <- colMeans(bartmod1_c$yhat.test.collapse) -
+              colMeans(bartmod0_c$yhat.test.collapse)
 ```
 
 Finally, the "fit-the-fit" approach is used to find subgroups exhibiting heterogeneity of treatment effect, starting with the binary outcome. In particular, a CART model is fit with the CATE for 90-day mortality as the outcome and the covariates as possible predictors. The model is first fit under default CART hyperparameter settings.
@@ -510,6 +643,7 @@ library(BART)
 library(caret)
 library(rpart)
 library(rpart.plot)
+source("chainfunctions.R")
 
 # Load data from appropriate directory (edit as needed)
 dat <- read.csv2("~/Downloads/synth_covid.csv")
@@ -541,18 +675,26 @@ Then we run a BART analysis focused on the binary mortality outcome.
 ```{r results=FALSE}
 # Fit BART models under default hyperparameters, get predictions under each trt
 set.seed(60622)
-bartmod1 <- mc.lbart(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
-                     x.test = dat1[, c(1, 4:13)], mc.cores = 4, ndpost = 4000)
-bartmod0 <- mc.lbart(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
-                     x.test = dat0[, c(1, 4:13)], mc.cores = 4, ndpost = 4000)
+bartmod1 <- lbart.chained(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
+                          x.test = dat1[, c(1, 4:13)], nchains = 4)
+bartmod0 <- lbart.chained(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
+                          x.test = dat0[, c(1, 4:13)], nchains = 4)
+
+# Collapse predictions across chains for certain calculations
+bartmod1$yhat.train.collapse <- apply(bartmod1$yhat.train, 2, rbind)
+bartmod1$yhat.test.collapse <- apply(bartmod1$yhat.test, 2, rbind)
+bartmod0$yhat.train.collapse <- apply(bartmod0$yhat.train, 2, rbind)
+bartmod0$yhat.test.collapse <- apply(bartmod0$yhat.test, 2, rbind)
 ```
 
-Then conditional average treatment effects are estimated using add math.
+Then conditional average treatment effects are estimated using predictions under each counterfactual.
 
 ```{r}
 dat$cate <-
-  exp(colMeans(bartmod1$yhat.test)) / (1 + exp(colMeans(bartmod1$yhat.test))) -
-  exp(colMeans(bartmod0$yhat.test)) / (1 + exp(colMeans(bartmod0$yhat.test)))
+  exp(colMeans(bartmod1$yhat.test.collapse)) /
+    (1 + exp(colMeans(bartmod1$yhat.test.collapse))) -
+  exp(colMeans(bartmod0$yhat.test.collapse)) /
+    (1 + exp(colMeans(bartmod0$yhat.test.collapse)))
 ```
 
 This full process is then repeated for the continuous outcome (days alive without life support by day 90).
@@ -560,15 +702,22 @@ This full process is then repeated for the continuous outcome (days alive withou
 ```{r results=FALSE}
 # Fit BART models under default hyperparameters, get predictions under each trt
 set.seed(60622)
-bartmod1_c <- mc.wbart(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
-                       x.test = dat1[, c(1, 4:13)], mc.cores = 4,
-                       ndpost = 4000)
-bartmod0_c <- mc.wbart(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
-                       x.test = dat0[, c(1, 4:13)], mc.cores = 4,
-                       ndpost = 4000)
+bartmod1_c <- wbart.chained(x.train = dat[, c(1, 4:13)],
+                            y.train = dat$dawols90,
+                            x.test = dat1[, c(1, 4:13)], nchains = 4)
+bartmod0_c <- wbart.chained(x.train = dat[, c(1, 4:13)],
+                            y.train = dat$dawols90,
+                            x.test = dat0[, c(1, 4:13)], nchains = 4)
+
+# Collapse predictions across chains for certain calculations
+bartmod1_c$yhat.train.collapse <- apply(bartmod1_c$yhat.train, 2, rbind)
+bartmod1_c$yhat.test.collapse <- apply(bartmod1_c$yhat.test, 2, rbind)
+bartmod0_c$yhat.train.collapse <- apply(bartmod0_c$yhat.train, 2, rbind)
+bartmod0_c$yhat.test.collapse <- apply(bartmod0_c$yhat.test, 2, rbind)
 
 # Estimate CATEs
-dat$cate_c <- colMeans(bartmod1_c$yhat.test) - colMeans(bartmod0_c$yhat.test)
+dat$cate_c <- colMeans(bartmod1_c$yhat.test.collapse) -
+              colMeans(bartmod0_c$yhat.test.collapse)
 ```
 
 Finally, the "fit-the-fit" approach is used to find subgroups exhibiting heterogeneity of treatment effect, starting with the binary outcome. In particular, a CART model is fit with the CATE for 90-day mortality as the outcome and the covariates as possible predictors. The model is first fit under default CART hyperparameter settings.
