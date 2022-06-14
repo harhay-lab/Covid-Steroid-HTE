@@ -1,13 +1,11 @@
 ---
 title: 'COVID STEROID 2: HTE Analysis'
-author: "Bryan Blette"
-date: '2022-06-07'
 output: pdf_document
 ---
 
 ## Analysis
 
-First the required R packages are loaded, as well as the data set.
+First the required R packages are loaded, as well as the data set. We also source a couple of functions to allow for running BART models with multiple MCMC chains (without needing multiple cores).
 
 ```{r message=FALSE}
 rm(list = ls())
@@ -15,6 +13,7 @@ library(BART)
 library(caret)
 library(rpart)
 library(rpart.plot)
+source("clusterfunctions.R")
 
 # Load data from appropriate directory (edit as needed)
 dat <- read.csv2("~/Downloads/synth_covid.csv")
@@ -56,13 +55,15 @@ for (hp in 1:27) {
   for (i in 1:10) {
         
     # BART model
-    bartmod <- lbart(x.train = dat[-folds[[i]], c(1, 4:13)],
-                     y.train = dat$dead90[-folds[[i]]],
-                     x.test = dat[folds[[i]], c(1, 4:13)],
-                     power = cvoutput$Power[hp], base = cvoutput$Base[hp],
-                     ntree = cvoutput$Ntrees[hp])
-    pred <- exp(colMeans(bartmod$yhat.test)) /
-            (1 + exp(colMeans(bartmod$yhat.test)))
+    bartmod <- lbart.cluster(x.train = dat[-folds[[i]], c(1, 4:13)],
+                             y.train = dat$dead90[-folds[[i]]],
+                             x.test = dat[folds[[i]], c(1, 4:13)],
+                             power = cvoutput$Power[hp],
+                             base = cvoutput$Base[hp],
+                             ntree = cvoutput$Ntrees[hp], nchains = 4)
+    bartmod$yhat.test.collapse <- apply(bartmod$yhat.test, 2, rbind)
+    pred <- exp(colMeans(bartmod$yhat.test.collapse)) /
+            (1 + exp(colMeans(bartmod$yhat.test.collapse)))
     mse[hp, i] <- mean((dat$dead90[folds[[i]]] - pred)^2)
         
   }
@@ -74,24 +75,34 @@ cvoutput$CVMSE <- rowMeans(mse)
 
 # Fit final model under hyperparameters with minimum CV error
 set.seed(60622)
-bartmod1 <- lbart(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
-                  x.test = dat1[, c(1, 4:13)],
-                  power = cvoutput$Power[which.min(cvoutput$CVMSE)],
-                  base = cvoutput$Base[which.min(cvoutput$CVMSE)],
-                  ntree = cvoutput$Ntrees[which.min(cvoutput$CVMSE)])
-bartmod0 <- lbart(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
-                  x.test = dat0[, c(1, 4:13)],
-                  power = cvoutput$Power[which.min(cvoutput$CVMSE)],
-                  base = cvoutput$Base[which.min(cvoutput$CVMSE)],
-                  ntree = cvoutput$Ntrees[which.min(cvoutput$CVMSE)])
+bartmod1 <-
+  lbart.cluster(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
+                x.test = dat1[, c(1, 4:13)], nchains = 4,
+                power = cvoutput$Power[which.min(cvoutput$CVMSE)],
+                base = cvoutput$Base[which.min(cvoutput$CVMSE)],
+                ntree = cvoutput$Ntrees[which.min(cvoutput$CVMSE)])
+bartmod0 <-
+  lbart.cluster(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
+                x.test = dat0[, c(1, 4:13)], nchains = 4,
+                power = cvoutput$Power[which.min(cvoutput$CVMSE)],
+                base = cvoutput$Base[which.min(cvoutput$CVMSE)],
+                ntree = cvoutput$Ntrees[which.min(cvoutput$CVMSE)])
+
+# Collapse predictions across chains for certain calculations
+bartmod1$yhat.train.collapse <- apply(bartmod1$yhat.train, 2, rbind)
+bartmod1$yhat.test.collapse <- apply(bartmod1$yhat.test, 2, rbind)
+bartmod0$yhat.train.collapse <- apply(bartmod0$yhat.train, 2, rbind)
+bartmod0$yhat.test.collapse <- apply(bartmod0$yhat.test, 2, rbind)
 ```
 
-Then conditional average treatment effects are estimated using add math.
+Then conditional average treatment effects are estimated using the predictions under each counterfactual.
 
 ```{r}
 dat$cate <-
-  exp(colMeans(bartmod1$yhat.test)) / (1 + exp(colMeans(bartmod1$yhat.test))) -
-  exp(colMeans(bartmod0$yhat.test)) / (1 + exp(colMeans(bartmod0$yhat.test)))
+  exp(colMeans(bartmod1$yhat.test.collapse)) /
+    (1 + exp(colMeans(bartmod1$yhat.test.collapse))) -
+  exp(colMeans(bartmod0$yhat.test.collapse)) /
+    (1 + exp(colMeans(bartmod0$yhat.test.collapse)))
 ```
 
 This full process is then repeated for the continuous outcome (days alive without life support by day 90).
@@ -108,12 +119,14 @@ for (hp in 1:27) {
   for (i in 1:10) {
         
     # BART model
-    bartmod_c <- wbart(x.train = dat[-folds[[i]], c(1, 4:13)],
-                       y.train = dat$dawols90[-folds[[i]]],
-                       x.test = dat[folds[[i]], c(1, 4:13)],
-                       power = cvoutput$Power[hp], base = cvoutput$Base[hp],
-                       ntree = cvoutput$Ntrees[hp])
-    pred_c <- colMeans(bartmod_c$yhat.test)
+    bartmod_c <- wbart.cluster(x.train = dat[-folds[[i]], c(1, 4:13)],
+                               y.train = dat$dawols90[-folds[[i]]],
+                               x.test = dat[folds[[i]], c(1, 4:13)],
+                               power = cvoutput$Power[hp],
+                               base = cvoutput$Base[hp],
+                               ntree = cvoutput$Ntrees[hp], nchains = 4)
+    bartmod_c$yhat.test.collapse <- apply(bartmod_c$yhat.test, 2, rbind)
+    pred_c <- colMeans(bartmod_c$yhat.test.collapse)
     mse_c[hp, i] <- mean((dat$dawols90[folds[[i]]] - pred_c)^2)
         
   }
@@ -125,19 +138,28 @@ cvoutput$CVMSE_c <- rowMeans(mse_c)
 
 # Fit final models under hyperparameters with minimum CV error
 set.seed(60622)
-bartmod1_c <- wbart(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
-                    x.test = dat1[, c(1, 4:13)],
-                    power = cvoutput$Power[which.min(cvoutput$CVMSE_c)],
-                    base = cvoutput$Base[which.min(cvoutput$CVMSE_c)],
-                    ntree = cvoutput$Ntrees[which.min(cvoutput$CVMSE_c)])
-bartmod0_c <- wbart(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
-                    x.test = dat0[, c(1, 4:13)],
-                    power = cvoutput$Power[which.min(cvoutput$CVMSE_c)],
-                    base = cvoutput$Base[which.min(cvoutput$CVMSE_c)],
-                    ntree = cvoutput$Ntrees[which.min(cvoutput$CVMSE_c)])
+bartmod1_c <-
+  wbart.cluster(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
+                x.test = dat1[, c(1, 4:13)], nchains = 4,
+                power = cvoutput$Power[which.min(cvoutput$CVMSE_c)],
+                base = cvoutput$Base[which.min(cvoutput$CVMSE_c)],
+                ntree = cvoutput$Ntrees[which.min(cvoutput$CVMSE_c)])
+bartmod0_c <-
+  wbart.cluster(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
+                x.test = dat0[, c(1, 4:13)], nchains = 4,
+                power = cvoutput$Power[which.min(cvoutput$CVMSE_c)],
+                base = cvoutput$Base[which.min(cvoutput$CVMSE_c)],
+                ntree = cvoutput$Ntrees[which.min(cvoutput$CVMSE_c)])
+
+# Collapse predictions across chains for certain calculations
+bartmod1_c$yhat.train.collapse <- apply(bartmod1_c$yhat.train, 2, rbind)
+bartmod1_c$yhat.test.collapse <- apply(bartmod1_c$yhat.test, 2, rbind)
+bartmod0_c$yhat.train.collapse <- apply(bartmod0_c$yhat.train, 2, rbind)
+bartmod0_c$yhat.test.collapse <- apply(bartmod0_c$yhat.test, 2, rbind)
 
 # Estimate CATEs
-dat$cate_c <- colMeans(bartmod1_c$yhat.test) - colMeans(bartmod0_c$yhat.test)
+dat$cate_c <- colMeans(bartmod1_c$yhat.test.collapse) -
+              colMeans(bartmod0_c$yhat.test.collapse)
 ```
 
 Finally, the "fit-the-fit" approach is used to find subgroups exhibiting heterogeneity of treatment effect, starting with the binary outcome. In particular, a CART model is fit with the CATE for 90-day mortality as the outcome and the covariates as possible predictors. The model is first fit under default CART hyperparameter settings.
@@ -269,13 +291,13 @@ Next we run standard diagnostics for each of the models. We begin with diagnosti
 ```{r}
 # MCMC chains for parameter in models of continuous outcome
 par(mfrow = c(2, 2))
-plot(bartmod0_c$sigma[, 1], type = "l")
+plot(bartmod0_c$sigma[, 1], type = "l", ylab = "First MCMC Chain")
 abline(v = 100, lwd = 2, col = "red")
-plot(bartmod0_c$sigma[, 2], type = "l")
+plot(bartmod0_c$sigma[, 2], type = "l", ylab = "Second MCMC Chain")
 abline(v = 100, lwd = 2, col = "red")
-plot(bartmod0_c$sigma[, 3], type = "l")
+plot(bartmod0_c$sigma[, 3], type = "l", ylab = "Third MCMC Chain")
 abline(v = 100, lwd = 2, col = "red")
-plot(bartmod0_c$sigma[, 4], type = "l")
+plot(bartmod0_c$sigma[, 4], type = "l", ylab = "Fourth MCMC Chain")
 abline(v = 100, lwd = 2, col = "red")
 
 plot(bartmod1_c$sigma[, 1], type = "l", ylab = "First MCMC Chain")
@@ -288,13 +310,64 @@ plot(bartmod1_c$sigma[, 4], type = "l", ylab = "Fourth MCMC Chain")
 abline(v = 100, lwd = 2, col = "red")
 ```
 
-One should check that each chain has converged after burn-in (designated by the vertical red lines).
+One should check that each chain has converged after burn-in (designated by the vertical red lines). In general, the chains should be converging to approximately the same value.
 
 Next consider diagnostics for the models with the binary mortality outcome as described in Sparapani (2021). First consider the autocorrelation of the estimated response surface from BART from 10 randomly selected subjects. This may start somewhat correlated for nearby observations, but should reduce to 0 correlation for observations further apart.
 
 ```{r}
-# First for bartmod0
-auto.corr <- acf(bartmod0$yhat.train[ , sample(1:dim(dat)[1], 10)], plot=FALSE)
+# First for bartmod0, one panel for each chain
+par(mfrow = c(2, 2))
+
+auto.corr <- acf(bartmod0$yhat.train[ , sample(1:dim(dat)[1], 10), 1],
+                 plot = FALSE)
+max.lag <- max(auto.corr$lag[ , 1, 1])
+
+j <- seq(-0.5, 0.4, length.out = 10)
+for (h in 1:10) {
+  if (h == 1) {
+    plot(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+         type = 'h', xlim = c(0, max.lag + 1), ylim = c(-1, 1),
+         ylab = 'acf', xlab = 'lag')
+  } else {
+    lines(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+          type = 'h', col = h)
+  }
+}
+
+auto.corr <- acf(bartmod0$yhat.train[ , sample(1:dim(dat)[1], 10), 2],
+                 plot = FALSE)
+max.lag <- max(auto.corr$lag[ , 1, 1])
+
+j <- seq(-0.5, 0.4, length.out = 10)
+for (h in 1:10) {
+  if (h == 1) {
+    plot(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+         type = 'h', xlim = c(0, max.lag + 1), ylim = c(-1, 1),
+         ylab = 'acf', xlab = 'lag')
+  } else {
+    lines(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+          type = 'h', col = h)
+  }
+}
+
+auto.corr <- acf(bartmod0$yhat.train[ , sample(1:dim(dat)[1], 10), 3],
+                 plot = FALSE)
+max.lag <- max(auto.corr$lag[ , 1, 1])
+
+j <- seq(-0.5, 0.4, length.out = 10)
+for (h in 1:10) {
+  if (h == 1) {
+    plot(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+         type = 'h', xlim = c(0, max.lag + 1), ylim = c(-1, 1),
+         ylab = 'acf', xlab = 'lag')
+  } else {
+    lines(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+          type = 'h', col = h)
+  }
+}
+
+auto.corr <- acf(bartmod0$yhat.train[ , sample(1:dim(dat)[1], 10), 4],
+                 plot = FALSE)
 max.lag <- max(auto.corr$lag[ , 1, 1])
 
 j <- seq(-0.5, 0.4, length.out = 10)
@@ -310,7 +383,56 @@ for (h in 1:10) {
 }
 
 # Then for bartmod1
-auto.corr <- acf(bartmod1$yhat.train[ , sample(1:dim(dat)[1], 10)], plot=FALSE)
+auto.corr <- acf(bartmod1$yhat.train[ , sample(1:dim(dat)[1], 10), 1],
+                 plot = FALSE)
+max.lag <- max(auto.corr$lag[ , 1, 1])
+
+j <- seq(-0.5, 0.4, length.out = 10)
+for (h in 1:10) {
+  if (h == 1) {
+    plot(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+         type = 'h', xlim = c(0, max.lag + 1), ylim = c(-1, 1),
+         ylab = 'acf', xlab = 'lag')
+  } else {
+    lines(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+          type = 'h', col = h)
+  }
+}
+
+auto.corr <- acf(bartmod1$yhat.train[ , sample(1:dim(dat)[1], 10), 2],
+                 plot = FALSE)
+max.lag <- max(auto.corr$lag[ , 1, 1])
+
+j <- seq(-0.5, 0.4, length.out = 10)
+for (h in 1:10) {
+  if (h == 1) {
+    plot(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+         type = 'h', xlim = c(0, max.lag + 1), ylim = c(-1, 1),
+         ylab = 'acf', xlab = 'lag')
+  } else {
+    lines(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+          type = 'h', col = h)
+  }
+}
+
+auto.corr <- acf(bartmod1$yhat.train[ , sample(1:dim(dat)[1], 10), 3],
+                 plot = FALSE)
+max.lag <- max(auto.corr$lag[ , 1, 1])
+
+j <- seq(-0.5, 0.4, length.out = 10)
+for (h in 1:10) {
+  if (h == 1) {
+    plot(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+         type = 'h', xlim = c(0, max.lag + 1), ylim = c(-1, 1),
+         ylab = 'acf', xlab = 'lag')
+  } else {
+    lines(1:max.lag + j[h], auto.corr$acf[1 + (1:max.lag), h, h],
+          type = 'h', col = h)
+  }
+}
+
+auto.corr <- acf(bartmod1$yhat.train[ , sample(1:dim(dat)[1], 10), 4],
+                 plot = FALSE)
 max.lag <- max(auto.corr$lag[ , 1, 1])
 
 j <- seq(-0.5, 0.4, length.out = 10)
@@ -325,11 +447,12 @@ for (h in 1:10) {
   }
 }
 ```
+
 Next, we plot the Geweke Z statistics for each individual, which should be approximately distributed as a standard Normal.
 
 ```{r}
 # First for bartmod0
-geweke <- gewekediag(bartmod0$yhat.train)
+geweke <- gewekediag(bartmod0$yhat.train.collapse)
 n <- dim(dat)[1]
 j <- -10^(log10(n) - 1)
 plot(geweke$z, pch = '.', cex = 2, ylab = 'z', xlab = 'i',
@@ -351,7 +474,7 @@ text(c(1, 1), c(-3.891, 3.891), pos=2, cex=0.6, labels='0.9999')
 text(c(1, 1), c(-4.417, 4.417), pos=2, cex=0.6, labels='0.99999')
 
 # Then for bartmod1
-geweke <- gewekediag(bartmod1$yhat.train)
+geweke <- gewekediag(bartmod1$yhat.train.collapse)
 plot(geweke$z, pch = '.', cex = 2, ylab = 'z', xlab = 'i',
      xlim=c(j, n), ylim=c(-5, 5))
 lines(1:n, rep(-1.96, n), type='l', col=6)
@@ -370,6 +493,7 @@ text(c(1, 1), c(-3.291, 3.291), pos=2, cex=0.6, labels='0.999')
 text(c(1, 1), c(-3.891, 3.891), pos=2, cex=0.6, labels='0.9999')
 text(c(1, 1), c(-4.417, 4.417), pos=2, cex=0.6, labels='0.99999')
 ```
+
 If several points lie beyond the dark blue line or further, consider using more thinning when fitting the models.
 
 ## Sensitivity analysis
@@ -380,14 +504,15 @@ Note that these analyses are unlikely to output the exact same trees as the orig
 
 ### Sensitivity analysis 1: Impute missing outcomes as alive
 
-First the memory is cleared and the data set is reloaded.
+First the memory is cleared and the data set is reloaded (the cross validation output is saved for future use).
 
 ```{r message=FALSE}
-rm(list = ls())
+rm(list = ls()[!(ls() %in% list("cvoutput"))])
 library(BART)
 library(caret)
 library(rpart)
 library(rpart.plot)
+source("clusterfunctions.R")
 
 # Load data from appropriate directory (edit as needed)
 dat <- read.csv2("~/Downloads/synth_covid.csv")
@@ -414,39 +539,68 @@ dat1$allocation <- TRUE
 dat0$allocation <- FALSE
 ```
 
-Then we run a BART analysis focused on the binary mortality outcome.
+Then we run a BART analysis focused on the binary mortality outcome. Note that we use the hyperparameters selected during the cross-validation procedures in the main analysis.
 
 ```{r results=FALSE}
-# Fit BART models under default hyperparameters, get predictions under each trt
+# Fit BART models, get predictions under each trt
 set.seed(60622)
-bartmod1 <- mc.lbart(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
-                     x.test = dat1[, c(1, 4:13)], mc.cores = 4, ndpost = 4000)
-bartmod0 <- mc.lbart(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
-                     x.test = dat0[, c(1, 4:13)], mc.cores = 4, ndpost = 4000)
+bartmod1 <-
+  lbart.cluster(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
+                x.test = dat1[, c(1, 4:13)], nchains = 4,
+                power = cvoutput$Power[which.min(cvoutput$CVMSE)],
+                base = cvoutput$Base[which.min(cvoutput$CVMSE)],
+                ntree = cvoutput$Ntrees[which.min(cvoutput$CVMSE)])
+bartmod0 <-
+  lbart.cluster(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
+                x.test = dat0[, c(1, 4:13)], nchains = 4,
+                power = cvoutput$Power[which.min(cvoutput$CVMSE)],
+                base = cvoutput$Base[which.min(cvoutput$CVMSE)],
+                ntree = cvoutput$Ntrees[which.min(cvoutput$CVMSE)])
+
+# Collapse predictions across chains for certain calculations
+bartmod1$yhat.train.collapse <- apply(bartmod1$yhat.train, 2, rbind)
+bartmod1$yhat.test.collapse <- apply(bartmod1$yhat.test, 2, rbind)
+bartmod0$yhat.train.collapse <- apply(bartmod0$yhat.train, 2, rbind)
+bartmod0$yhat.test.collapse <- apply(bartmod0$yhat.test, 2, rbind)
 ```
 
-Then conditional average treatment effects are estimated using add math.
+Then conditional average treatment effects are estimated using the predictions under each counterfactual.
 
 ```{r}
 dat$cate <-
-  exp(colMeans(bartmod1$yhat.test)) / (1 + exp(colMeans(bartmod1$yhat.test))) -
-  exp(colMeans(bartmod0$yhat.test)) / (1 + exp(colMeans(bartmod0$yhat.test)))
+  exp(colMeans(bartmod1$yhat.test.collapse)) /
+    (1 + exp(colMeans(bartmod1$yhat.test.collapse))) -
+  exp(colMeans(bartmod0$yhat.test.collapse)) /
+    (1 + exp(colMeans(bartmod0$yhat.test.collapse)))
 ```
 
 This full process is then repeated for the continuous outcome (days alive without life support by day 90).
 
 ```{r results=FALSE}
-# Fit BART models under default hyperparameters, get predictions under each trt
+# Fit BART models, get predictions under each trt
 set.seed(60622)
-bartmod1_c <- mc.wbart(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
-                       x.test = dat1[, c(1, 4:13)], mc.cores = 4,
-                       ndpost = 4000)
-bartmod0_c <- mc.wbart(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
-                       x.test = dat0[, c(1, 4:13)], mc.cores = 4,
-                       ndpost = 4000)
+bartmod1_c <-
+  wbart.cluster(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
+                x.test = dat1[, c(1, 4:13)], nchains = 4,
+                power = cvoutput$Power[which.min(cvoutput$CVMSE_c)],
+                base = cvoutput$Base[which.min(cvoutput$CVMSE_c)],
+                ntree = cvoutput$Ntrees[which.min(cvoutput$CVMSE_c)])
+bartmod0_c <-
+  wbart.cluster(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
+                x.test = dat0[, c(1, 4:13)], nchains = 4,
+                power = cvoutput$Power[which.min(cvoutput$CVMSE_c)],
+                base = cvoutput$Base[which.min(cvoutput$CVMSE_c)],
+                ntree = cvoutput$Ntrees[which.min(cvoutput$CVMSE_c)])
+
+# Collapse predictions across chains for certain calculations
+bartmod1_c$yhat.train.collapse <- apply(bartmod1_c$yhat.train, 2, rbind)
+bartmod1_c$yhat.test.collapse <- apply(bartmod1_c$yhat.test, 2, rbind)
+bartmod0_c$yhat.train.collapse <- apply(bartmod0_c$yhat.train, 2, rbind)
+bartmod0_c$yhat.test.collapse <- apply(bartmod0_c$yhat.test, 2, rbind)
 
 # Estimate CATEs
-dat$cate_c <- colMeans(bartmod1_c$yhat.test) - colMeans(bartmod0_c$yhat.test)
+dat$cate_c <- colMeans(bartmod1_c$yhat.test.collapse) -
+              colMeans(bartmod0_c$yhat.test.collapse)
 ```
 
 Finally, the "fit-the-fit" approach is used to find subgroups exhibiting heterogeneity of treatment effect, starting with the binary outcome. In particular, a CART model is fit with the CATE for 90-day mortality as the outcome and the covariates as possible predictors. The model is first fit under default CART hyperparameter settings.
@@ -574,11 +728,12 @@ rpart.plot(prunedtree)
 First the memory is cleared and the data set is reloaded.
 
 ```{r message=FALSE}
-rm(list = ls())
+rm(list = ls()[!(ls() %in% list("cvoutput"))])
 library(BART)
 library(caret)
 library(rpart)
 library(rpart.plot)
+source("clusterfunctions.R")
 
 # Load data from appropriate directory (edit as needed)
 dat <- read.csv2("~/Downloads/synth_covid.csv")
@@ -610,18 +765,34 @@ Then we run a BART analysis focused on the binary mortality outcome.
 ```{r results=FALSE}
 # Fit BART models under default hyperparameters, get predictions under each trt
 set.seed(60622)
-bartmod1 <- mc.lbart(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
-                     x.test = dat1[, c(1, 4:13)], mc.cores = 4, ndpost = 4000)
-bartmod0 <- mc.lbart(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
-                     x.test = dat0[, c(1, 4:13)], mc.cores = 4, ndpost = 4000)
+bartmod1 <-
+  lbart.cluster(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
+                x.test = dat1[, c(1, 4:13)], nchains = 4,
+                power = cvoutput$Power[which.min(cvoutput$CVMSE)],
+                base = cvoutput$Base[which.min(cvoutput$CVMSE)],
+                ntree = cvoutput$Ntrees[which.min(cvoutput$CVMSE)])
+bartmod0 <-
+  lbart.cluster(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
+                x.test = dat0[, c(1, 4:13)], nchains = 4,
+                power = cvoutput$Power[which.min(cvoutput$CVMSE)],
+                base = cvoutput$Base[which.min(cvoutput$CVMSE)],
+                ntree = cvoutput$Ntrees[which.min(cvoutput$CVMSE)])
+
+# Collapse predictions across chains for certain calculations
+bartmod1$yhat.train.collapse <- apply(bartmod1$yhat.train, 2, rbind)
+bartmod1$yhat.test.collapse <- apply(bartmod1$yhat.test, 2, rbind)
+bartmod0$yhat.train.collapse <- apply(bartmod0$yhat.train, 2, rbind)
+bartmod0$yhat.test.collapse <- apply(bartmod0$yhat.test, 2, rbind)
 ```
 
-Then conditional average treatment effects are estimated using add math.
+Then conditional average treatment effects are estimated using the predictions under each counterfactual.
 
 ```{r}
 dat$cate <-
-  exp(colMeans(bartmod1$yhat.test)) / (1 + exp(colMeans(bartmod1$yhat.test))) -
-  exp(colMeans(bartmod0$yhat.test)) / (1 + exp(colMeans(bartmod0$yhat.test)))
+  exp(colMeans(bartmod1$yhat.test.collapse)) /
+    (1 + exp(colMeans(bartmod1$yhat.test.collapse))) -
+  exp(colMeans(bartmod0$yhat.test.collapse)) /
+    (1 + exp(colMeans(bartmod0$yhat.test.collapse)))
 ```
 
 This full process is then repeated for the continuous outcome (days alive without life support by day 90).
@@ -629,15 +800,28 @@ This full process is then repeated for the continuous outcome (days alive withou
 ```{r results=FALSE}
 # Fit BART models under default hyperparameters, get predictions under each trt
 set.seed(60622)
-bartmod1_c <- mc.wbart(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
-                       x.test = dat1[, c(1, 4:13)], mc.cores = 4,
-                       ndpost = 4000)
-bartmod0_c <- mc.wbart(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
-                       x.test = dat0[, c(1, 4:13)], mc.cores = 4,
-                       ndpost = 4000)
+bartmod1_c <-
+  wbart.cluster(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
+                x.test = dat1[, c(1, 4:13)], nchains = 4,
+                power = cvoutput$Power[which.min(cvoutput$CVMSE_c)],
+                base = cvoutput$Base[which.min(cvoutput$CVMSE_c)],
+                ntree = cvoutput$Ntrees[which.min(cvoutput$CVMSE_c)])
+bartmod0_c <-
+  wbart.cluster(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
+                x.test = dat0[, c(1, 4:13)], nchains = 4,
+                power = cvoutput$Power[which.min(cvoutput$CVMSE_c)],
+                base = cvoutput$Base[which.min(cvoutput$CVMSE_c)],
+                ntree = cvoutput$Ntrees[which.min(cvoutput$CVMSE_c)])
+
+# Collapse predictions across chains for certain calculations
+bartmod1_c$yhat.train.collapse <- apply(bartmod1_c$yhat.train, 2, rbind)
+bartmod1_c$yhat.test.collapse <- apply(bartmod1_c$yhat.test, 2, rbind)
+bartmod0_c$yhat.train.collapse <- apply(bartmod0_c$yhat.train, 2, rbind)
+bartmod0_c$yhat.test.collapse <- apply(bartmod0_c$yhat.test, 2, rbind)
 
 # Estimate CATEs
-dat$cate_c <- colMeans(bartmod1_c$yhat.test) - colMeans(bartmod0_c$yhat.test)
+dat$cate_c <- colMeans(bartmod1_c$yhat.test.collapse) -
+              colMeans(bartmod0_c$yhat.test.collapse)
 ```
 
 Finally, the "fit-the-fit" approach is used to find subgroups exhibiting heterogeneity of treatment effect, starting with the binary outcome. In particular, a CART model is fit with the CATE for 90-day mortality as the outcome and the covariates as possible predictors. The model is first fit under default CART hyperparameter settings.
