@@ -104,6 +104,12 @@ bartmod0$yhat.train.collapse <- apply(bartmod0$yhat.train, 2, rbind)
 bartmod0$yhat.test.collapse <- apply(bartmod0$yhat.test, 2, rbind)
 ```
 
+Print the chosen hyperparameters here for future reference:
+
+```{r}
+print(cvoutput[which.min(cvoutput$CVMSE), ])
+```
+
 Then conditional average treatment effects are estimated using the predictions under each counterfactual.
 
 ```{r}
@@ -169,6 +175,12 @@ bartmod0_c$yhat.test.collapse <- apply(bartmod0_c$yhat.test, 2, rbind)
 # Estimate CATEs
 dat$cate_c <- colMeans(bartmod1_c$yhat.test.collapse) -
               colMeans(bartmod0_c$yhat.test.collapse)
+```
+
+Print the chosen hyperparameters here for future reference:
+
+```{r}
+print(cvoutput[which.min(cvoutput$CVMSE_c), ])
 ```
 
 Finally, the "fit-the-fit" approach is used to find subgroups exhibiting heterogeneity of treatment effect, starting with the binary outcome. In particular, a CART model is fit with the CATE for 90-day mortality as the outcome and the covariates as possible predictors. The model is first fit under default CART hyperparameter settings.
