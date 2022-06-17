@@ -192,55 +192,12 @@ cartmod <- rpart(cate ~ ., data = dat[, c(4:14)], method = "anova")
 rpart.plot(cartmod)
 ```
 
-Now we prune the tree for interpretability using the stepwise approach of Hu et al. In particular, covariates are added to the CART model sequentially according to greatest increase in model $R^{2}$ until an increase of less than 1% occurs.
-
-```{r results=FALSE}
-# Pruned tree using stepwise approach of Hu et al.
-r2 <- c()
-covar_include <- c()
-covar_cols <- 4:13
-currentr2 <- 0
-maxcovars <- 4
-
-for (numcovars in 1:maxcovars) {
-  
-  for (covar in covar_cols) {
-    cartmod <- rpart(cate ~ ., data = dat[, c(covar, covar_include, 14)],
-                     method = "anova")
-    r2[which(covar_cols == covar)] <-
-      1 - printcp(cartmod)[dim(printcp(cartmod))[1], 3]
-  }
-  
-  if ((max(r2) - currentr2) / currentr2 > 0.01) {
-    covar_include <- c(covar_include, covar_cols[which.max(r2)])
-    covar_cols <- covar_cols[covar_cols != covar_cols[which.max(r2)]]
-    currentr2 <- max(r2)
-    r2 <- c()
-  } else {
-    break
-  }
-  
-}
-```
-
-Print out the number of covariates selected and the resulting CART model output.
+Now we prune the tree for interpretability using a maximum depth of 3 nodes.
 
 ```{r dpi=600}
-print("Number of covariates:")
-print(numcovars - 1)
-cartmod <- rpart(cate ~ ., data = dat[, c(covar_include, 14)],
-                     method = "anova")
+cartmod <- rpart(cate ~ ., data = dat[, c(4:14)], method = "anova",
+                 maxdepth = 3)
 rpart.plot(cartmod)
-```
-
-Finally we explore further pruning:
-
-```{r dpi=600}
-printcp(cartmod)
-prunedtree <-
-  prune(cartmod,
-        cp = cartmod$cptable[which.min(cartmod$cptable[, "xerror"]), "CP"])
-rpart.plot(prunedtree)
 ```
 
 Next the same fit-the-fit approach is used to summarize the results for the continuous outcome, starting with a CART model using all covariates and default hyperparameter.
@@ -252,58 +209,13 @@ cartmod <- rpart(cate_c ~ ., data = dat[, c(4:13, 15)], method = "anova")
 rpart.plot(cartmod)
 ```
 
-Now we prune the tree for interpretability using the stepwise approach of Hu et al.
-
-```{r results=FALSE}
-# Pruned tree using stepwise approach of Hu et al.
-r2 <- c()
-covar_include <- c()
-covar_cols <- 4:13
-currentr2 <- 0
-maxcovars <- 4
-
-for (numcovars in 1:maxcovars) {
-  
-  for (covar in covar_cols) {
-    cartmod <- rpart(cate_c ~ ., data = dat[, c(covar, covar_include, 15)],
-                     method = "anova")
-    r2[which(covar_cols == covar)] <-
-      1 - printcp(cartmod)[dim(printcp(cartmod))[1], 3]
-  }
-  
-  if ((max(r2) - currentr2) / currentr2 > 0.01) {
-    covar_include <- c(covar_include, covar_cols[which.max(r2)])
-    covar_cols <- covar_cols[covar_cols != covar_cols[which.max(r2)]]
-    currentr2 <- max(r2)
-    r2 <- c()
-  } else {
-    break
-  }
-  
-}
-```
-
-Print out the number of covariates selected and the resulting CART model output.
+Now we prune the tree for interpretability using a maximum depth of 3 nodes.
 
 ```{r dpi=600}
-print("Number of covariates:")
-print(numcovars - 1)
-cartmod <- rpart(cate_c ~ ., data = dat[, c(covar_include, 15)],
-                     method = "anova")
+cartmod <- rpart(cate_c ~ ., data = dat[, c(4:13, 15)], method = "anova",
+                 maxdepth = 3)
 rpart.plot(cartmod)
 ```
-
-Finally we explore further pruning:
-
-```{r dpi=600}
-printcp(cartmod)
-prunedtree <-
-  prune(cartmod,
-        cp = cartmod$cptable[which.min(cartmod$cptable[, "xerror"]), "CP"])
-rpart.plot(prunedtree)
-```
-
-Further (non-automated) pruning may need to be considered here for trees that remain too large to easily interpret.
 
 ## Diagnostics
 
@@ -639,55 +551,12 @@ cartmod <- rpart(cate ~ ., data = dat[, c(4:14)], method = "anova")
 rpart.plot(cartmod)
 ```
 
-Now we prune the tree for interpretability using the stepwise approach of Hu et al. In particular, covariates are added to the CART model sequentially according to greatest increase in model $R^{2}$ until an increase of less than 1% occurs.
-
-```{r results=FALSE}
-# Pruned tree using stepwise approach of Hu et al.
-r2 <- c()
-covar_include <- c()
-covar_cols <- 4:13
-currentr2 <- 0
-maxcovars <- 4
-
-for (numcovars in 1:maxcovars) {
-  
-  for (covar in covar_cols) {
-    cartmod <- rpart(cate ~ ., data = dat[, c(covar, covar_include, 14)],
-                     method = "anova")
-    r2[which(covar_cols == covar)] <-
-      1 - printcp(cartmod)[dim(printcp(cartmod))[1], 3]
-  }
-  
-  if ((max(r2) - currentr2) / currentr2 > 0.01) {
-    covar_include <- c(covar_include, covar_cols[which.max(r2)])
-    covar_cols <- covar_cols[covar_cols != covar_cols[which.max(r2)]]
-    currentr2 <- max(r2)
-    r2 <- c()
-  } else {
-    break
-  }
-  
-}
-```
-
-Print out the number of covariates selected and the resulting CART model output.
+Now we prune the tree for interpretability using a maximum depth of 3 nodes.
 
 ```{r dpi=600}
-print("Number of covariates:")
-print(numcovars - 1)
-cartmod <- rpart(cate ~ ., data = dat[, c(covar_include, 14)],
-                     method = "anova")
+cartmod <- rpart(cate ~ ., data = dat[, c(4:14)], method = "anova",
+                 maxdepth = 3)
 rpart.plot(cartmod)
-```
-
-Finally we explore further pruning:
-
-```{r dpi=600}
-printcp(cartmod)
-prunedtree <-
-  prune(cartmod,
-        cp = cartmod$cptable[which.min(cartmod$cptable[, "xerror"]), "CP"])
-rpart.plot(prunedtree)
 ```
 
 Next the same fit-the-fit approach is used to summarize the results for the continuous outcome, starting with a CART model using all covariates and default hyperparameter.
@@ -699,55 +568,12 @@ cartmod <- rpart(cate_c ~ ., data = dat[, c(4:13, 15)], method = "anova")
 rpart.plot(cartmod)
 ```
 
-Now we prune the tree for interpretability using the stepwise approach of Hu et al.
-
-```{r results=FALSE}
-# Pruned tree using stepwise approach of Hu et al.
-r2 <- c()
-covar_include <- c()
-covar_cols <- 4:13
-currentr2 <- 0
-maxcovars <- 4
-
-for (numcovars in 1:maxcovars) {
-  
-  for (covar in covar_cols) {
-    cartmod <- rpart(cate_c ~ ., data = dat[, c(covar, covar_include, 15)],
-                     method = "anova")
-    r2[which(covar_cols == covar)] <-
-      1 - printcp(cartmod)[dim(printcp(cartmod))[1], 3]
-  }
-  
-  if ((max(r2) - currentr2) / currentr2 > 0.01) {
-    covar_include <- c(covar_include, covar_cols[which.max(r2)])
-    covar_cols <- covar_cols[covar_cols != covar_cols[which.max(r2)]]
-    currentr2 <- max(r2)
-    r2 <- c()
-  } else {
-    break
-  }
-  
-}
-```
-
-Print out the number of covariates selected and the resulting CART model output.
+Now we prune the tree for interpretability using a maximum depth of 3 nodes.
 
 ```{r dpi=600}
-print("Number of covariates:")
-print(numcovars - 1)
-cartmod <- rpart(cate_c ~ ., data = dat[, c(covar_include, 15)],
-                     method = "anova")
+cartmod <- rpart(cate_c ~ ., data = dat[, c(4:13, 15)], method = "anova",
+                 maxdepth = 3)
 rpart.plot(cartmod)
-```
-
-Finally we explore further pruning:
-
-```{r dpi=600}
-printcp(cartmod)
-prunedtree <-
-  prune(cartmod,
-        cp = cartmod$cptable[which.min(cartmod$cptable[, "xerror"]), "CP"])
-rpart.plot(prunedtree)
 ```
 
 ### Sensitivity analysis 2: Impute missing outcomes as deceased
@@ -861,55 +687,12 @@ cartmod <- rpart(cate ~ ., data = dat[, c(4:14)], method = "anova")
 rpart.plot(cartmod)
 ```
 
-Now we prune the tree for interpretability using the stepwise approach of Hu et al. In particular, covariates are added to the CART model sequentially according to greatest increase in model $R^{2}$ until an increase of less than 1% occurs.
-
-```{r results=FALSE}
-# Pruned tree using stepwise approach of Hu et al.
-r2 <- c()
-covar_include <- c()
-covar_cols <- 4:13
-currentr2 <- 0
-maxcovars <- 4
-
-for (numcovars in 1:maxcovars) {
-  
-  for (covar in covar_cols) {
-    cartmod <- rpart(cate ~ ., data = dat[, c(covar, covar_include, 14)],
-                     method = "anova")
-    r2[which(covar_cols == covar)] <-
-      1 - printcp(cartmod)[dim(printcp(cartmod))[1], 3]
-  }
-  
-  if ((max(r2) - currentr2) / currentr2 > 0.01) {
-    covar_include <- c(covar_include, covar_cols[which.max(r2)])
-    covar_cols <- covar_cols[covar_cols != covar_cols[which.max(r2)]]
-    currentr2 <- max(r2)
-    r2 <- c()
-  } else {
-    break
-  }
-  
-}
-```
-
-Print out the number of covariates selected and the resulting CART model output.
+Now we prune the tree for interpretability using a maximum depth of 3 nodes.
 
 ```{r dpi=600}
-print("Number of covariates:")
-print(numcovars - 1)
-cartmod <- rpart(cate ~ ., data = dat[, c(covar_include, 14)],
-                     method = "anova")
+cartmod <- rpart(cate ~ ., data = dat[, c(4:14)], method = "anova",
+                 maxdepth = 3)
 rpart.plot(cartmod)
-```
-
-Finally we explore further pruning:
-
-```{r dpi=600}
-printcp(cartmod)
-prunedtree <-
-  prune(cartmod,
-        cp = cartmod$cptable[which.min(cartmod$cptable[, "xerror"]), "CP"])
-rpart.plot(prunedtree)
 ```
 
 Next the same fit-the-fit approach is used to summarize the results for the continuous outcome, starting with a CART model using all covariates and default hyperparameter.
@@ -921,55 +704,12 @@ cartmod <- rpart(cate_c ~ ., data = dat[, c(4:13, 15)], method = "anova")
 rpart.plot(cartmod)
 ```
 
-Now we prune the tree for interpretability using the stepwise approach of Hu et al.
-
-```{r results=FALSE}
-# Pruned tree using stepwise approach of Hu et al.
-r2 <- c()
-covar_include <- c()
-covar_cols <- 4:13
-currentr2 <- 0
-maxcovars <- 4
-
-for (numcovars in 1:maxcovars) {
-  
-  for (covar in covar_cols) {
-    cartmod <- rpart(cate_c ~ ., data = dat[, c(covar, covar_include, 15)],
-                     method = "anova")
-    r2[which(covar_cols == covar)] <-
-      1 - printcp(cartmod)[dim(printcp(cartmod))[1], 3]
-  }
-  
-  if ((max(r2) - currentr2) / currentr2 > 0.01) {
-    covar_include <- c(covar_include, covar_cols[which.max(r2)])
-    covar_cols <- covar_cols[covar_cols != covar_cols[which.max(r2)]]
-    currentr2 <- max(r2)
-    r2 <- c()
-  } else {
-    break
-  }
-  
-}
-```
-
-Print out the number of covariates selected and the resulting CART model output.
+Now we prune the tree for interpretability using a maximum depth of 3 nodes.
 
 ```{r dpi=600}
-print("Number of covariates:")
-print(numcovars - 1)
-cartmod <- rpart(cate_c ~ ., data = dat[, c(covar_include, 15)],
-                     method = "anova")
+cartmod <- rpart(cate_c ~ ., data = dat[, c(4:13, 15)], method = "anova",
+                 maxdepth = 3)
 rpart.plot(cartmod)
-```
-
-Finally we explore further pruning:
-
-```{r dpi=600}
-printcp(cartmod)
-prunedtree <-
-  prune(cartmod,
-        cp = cartmod$cptable[which.min(cartmod$cptable[, "xerror"]), "CP"])
-rpart.plot(prunedtree)
 ```
 
 AG: Log date and session info (reproducibility/save package versions etc.):
