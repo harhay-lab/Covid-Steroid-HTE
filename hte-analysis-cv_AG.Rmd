@@ -36,6 +36,13 @@ dat$resp_sup <- as.factor(dat$resp_sup)
 dat$dead90 <- ifelse(dat$dead90 == TRUE, 1, 0)
 dat <- dat[complete.cases(dat), ]
 
+# Print out summaries of continuous covariates pre-standardization in case
+# needed for interpretation
+print(mean(dat$age, na.rm = T))
+print(sd(dat$age, na.rm = T))
+print(mean(dat$BL9_Weight, na.rm = T))
+print(sd(dat$BL9_Weight, na.rm = T))
+
 # Standardize continuous covariates
 dat$age <- (dat$age - mean(dat$age)) / sd(dat$age)
 dat$BL9_Weight <- (dat$BL9_Weight - mean(dat$BL9_Weight)) / sd(dat$BL9_Weight)
@@ -44,6 +51,12 @@ dat$BL9_Weight <- (dat$BL9_Weight - mean(dat$BL9_Weight)) / sd(dat$BL9_Weight)
 dat1 <- dat0 <- dat
 dat1$allocation <- TRUE
 dat0$allocation <- FALSE
+
+# Rename covariates so decision tree figures can be used without edits
+colnames(dat)[4:13] <- c("Age", "Limits_Care", "Respiratory_Support",
+                         "Interleukin", "Early_Corticosteroids", "Weight",
+                         "Diabetes", "Ischemic_Heart_Disease",
+                         "Pulmonary_Disease", "Immunosuppression")
 ```
 
 Then we run a BART analysis focused on the binary mortality outcome.
