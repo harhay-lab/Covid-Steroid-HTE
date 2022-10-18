@@ -293,7 +293,7 @@ cartmod <- rpart(cate ~ ., data = dat[, c(4:13, 18)], method = "anova",
 rpart.plot(cartmod)
 
 # Output as PDF
-pdf(file = "fig2.pdf")
+pdf(file = "fig4.pdf")
 rpart.plot(cartmod, yesno = 2)
 dev.off()
 ```
@@ -315,7 +315,7 @@ cartmod <- rpart(cate_c ~ ., data = dat[, c(4:13, 19)], method = "anova",
 rpart.plot(cartmod)
 
 # Output as PDF
-pdf(file = "fig1.pdf")
+pdf(file = "fig3.pdf")
 rpart.plot(cartmod, yesno = 2)
 dev.off()
 ```
@@ -550,7 +550,7 @@ figdat2 <- figdat2[order(figdat2$cate, decreasing = FALSE), ]
 figdat2$index <- 1:nrow(figdat2)
 figdat <- rbind(figdat1, figdat2)
 
-fig3 <- ggplot(figdat, aes(x = index, y = cate)) +
+fig1 <- ggplot(figdat, aes(x = index, y = cate)) +
   facet_wrap(~outcome, scales = "free") +
   geom_smooth(aes(ymin = cate_lower, ymax = cate_upper), stat = "identity",
               colour = "black") +
@@ -559,24 +559,53 @@ fig3 <- ggplot(figdat, aes(x = index, y = cate)) +
   scale_fill_grey()
 
 # Output as PDF
-pdf(file = "fig3.pdf")
-fig3
+pdf(file = "fig1.pdf")
+fig1
 dev.off()
 ```
+
+### Treatment effect table
 
 ### Partial dependence plots
 
 ```{r}
-age_list <- seq(-2.8, 1.8, by = 0.2)
-weight_list <- seq(-1.8, 3.6, by = 0.2)
+# Age and weight grids to be evaluated
+age_list <- seq(-2.8, 1.8, by = 1)
+weight_list <- seq(-1.8, 3.6, by = 1)
 
+# Make data frames for each figure panel
+figdat1_age <- data.frame("covar_val" = age_list)
+figdat1_age$outcome <- "Mortality"
+figdat1_age$covar_type <- "Age"
+figdat1_age$cate <- figdat1_age$cate_lower <- figdat1_age$cate_upper <- NA
+
+figdat2_age <- data.frame("covar_val" = age_list)
+figdat2_age$outcome <- "DAWOLS"
+figdat2_age$covar_type <- "Age"
+figdat2_age$cate <- figdat2_age$cate_lower <- figdat2_age$cate_upper <- NA
+
+figdat1_weight <- data.frame("covar_val" = weight_list)
+figdat1_weight$outcome <- "Mortality"
+figdat1_weight$covar_type <- "Weight"
+figdat1_weight$cate <- figdat1_weight$cate_lower <-
+  figdat1_weight$cate_upper <- NA
+
+figdat2_weight <- data.frame("covar_val" = weight_list)
+figdat2_weight$outcome <- "DAWOLS"
+figdat2_weight$covar_type <- "Weight"
+figdat2_weight$cate <- figdat2_weight$cate_lower <-
+  figdat2_weight$cate_upper <- NA
+
+# First get estimates across age covariate
 for (i in 1:length(age_list)) {
   
   dat1_age <- dat1
-  dat1_age$Age <- age_list[i]
+  dat1_age$age <- age_list[i]
   dat0_age <- dat0
-  dat0_age$Age <- age_list[i]
+  dat0_age$age <- age_list[i]
   
+  # Get BART predictions for each pseudo-patient for the binary outcome
+  # Can rerun BART models for ease of not updating cluster functions
   set.seed(60622)
   bartmod1 <-
     lbart.cluster(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
@@ -589,9 +618,152 @@ for (i in 1:length(age_list)) {
                   power = cvresults_mort[1], base = cvresults_mort[2],
                   ntree = cvresults_mort[3])
   
+  # Collapse predictions across chains for calculations
+  bartmod1$yhat.test.collapse <- apply(bartmod1$yhat.test, 2, rbind)
+  bartmod0$yhat.test.collapse <- apply(bartmod0$yhat.test, 2, rbind)
+
+  figdat1_age$cate[i] <-
+    mean(exp(colMeans(bartmod1$yhat.test.collapse)) /
+           (1 + exp(colMeans(bartmod1$yhat.test.collapse))) -
+         exp(colMeans(bartmod0$yhat.test.collapse)) /
+           (1 + exp(colMeans(bartmod0$yhat.test.collapse))))
+
+  figdat1_age$cate_lower[i] <-
+    mean(apply(exp(bartmod1$yhat.test.collapse) /
+            (1 + exp(bartmod1$yhat.test.collapse)) -
+          exp(bartmod0$yhat.test.collapse) /
+            (1 + exp(bartmod0$yhat.test.collapse)),
+          2, quantile, probs = 0.025))
+  
+  figdat1_age$cate_upper[i] <-
+    mean(apply(exp(bartmod1$yhat.test.collapse) /
+            (1 + exp(bartmod1$yhat.test.collapse)) -
+          exp(bartmod0$yhat.test.collapse) /
+            (1 + exp(bartmod0$yhat.test.collapse)),
+          2, quantile, probs = 0.975))
+  
+  
+  # Get BART predictions for each pseudo-patient for the continuous outcome
+  set.seed(60622)
+  bartmod1_c <-
+    wbart.cluster(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
+                  x.test = dat1_age[, c(1, 4:13)], nchains = 4,
+                  power = cvresults_dawols[1], base = cvresults_dawols[2],
+                  ntree = cvresults_dawols[3])
+  bartmod0_c <-
+    wbart.cluster(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
+                  x.test = dat0_age[, c(1, 4:13)], nchains = 4,
+                  power = cvresults_dawols[1], base = cvresults_dawols[2],
+                  ntree = cvresults_dawols[3])
+  
+  # Collapse predictions across chains for certain calculations
+  bartmod1_c$yhat.test.collapse <- apply(bartmod1_c$yhat.test, 2, rbind)
+  bartmod0_c$yhat.test.collapse <- apply(bartmod0_c$yhat.test, 2, rbind)
+  
+  figdat2_age$cate[i] <- mean(colMeans(bartmod1_c$yhat.test.collapse) -
+                              colMeans(bartmod0_c$yhat.test.collapse))
+
+  figdat2_age$cate_lower[i] <-
+    mean(apply(bartmod1_c$yhat.test.collapse - bartmod0_c$yhat.test.collapse,
+          2, quantile, probs = 0.025))
+  
+  figdat2_age$cate_upper[i] <-
+    mean(apply(bartmod1_c$yhat.test.collapse - bartmod0_c$yhat.test.collapse,
+          2, quantile, probs = 0.975))
+  
 }
 
+# Then get estimates across weight covariate
+for (i in 1:length(weight_list)) {
+  
+  dat1_weight <- dat1
+  dat1_weight$BL9_Weight <- weight_list[i]
+  dat0_weight <- dat0
+  dat0_weight$BL9_Weight <- weight_list[i]
+  
+  # Get BART predictions for each pseudo-patient for the binary outcome
+  # Can rerun BART models for ease of not updating cluster functions
+  set.seed(60622)
+  bartmod1 <-
+    lbart.cluster(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
+                  x.test = dat1_weight[, c(1, 4:13)], nchains = 4,
+                  power = cvresults_mort[1], base = cvresults_mort[2],
+                  ntree = cvresults_mort[3])
+  bartmod0 <-
+    lbart.cluster(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
+                  x.test = dat0_weight[, c(1, 4:13)], nchains = 4,
+                  power = cvresults_mort[1], base = cvresults_mort[2],
+                  ntree = cvresults_mort[3])
+  
+  # Collapse predictions across chains for calculations
+  bartmod1$yhat.test.collapse <- apply(bartmod1$yhat.test, 2, rbind)
+  bartmod0$yhat.test.collapse <- apply(bartmod0$yhat.test, 2, rbind)
 
+  figdat1_weight$cate[i] <-
+    mean(exp(colMeans(bartmod1$yhat.test.collapse)) /
+           (1 + exp(colMeans(bartmod1$yhat.test.collapse))) -
+         exp(colMeans(bartmod0$yhat.test.collapse)) /
+           (1 + exp(colMeans(bartmod0$yhat.test.collapse))))
+
+  figdat1_weight$cate_lower[i] <-
+    mean(apply(exp(bartmod1$yhat.test.collapse) /
+            (1 + exp(bartmod1$yhat.test.collapse)) -
+          exp(bartmod0$yhat.test.collapse) /
+            (1 + exp(bartmod0$yhat.test.collapse)),
+          2, quantile, probs = 0.025))
+  
+  figdat1_weight$cate_upper[i] <-
+    mean(apply(exp(bartmod1$yhat.test.collapse) /
+            (1 + exp(bartmod1$yhat.test.collapse)) -
+          exp(bartmod0$yhat.test.collapse) /
+            (1 + exp(bartmod0$yhat.test.collapse)),
+          2, quantile, probs = 0.975))
+  
+  
+  # Get BART predictions for each pseudo-patient for the continuous outcome
+  set.seed(60622)
+  bartmod1_c <-
+    wbart.cluster(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
+                  x.test = dat1_weight[, c(1, 4:13)], nchains = 4,
+                  power = cvresults_dawols[1], base = cvresults_dawols[2],
+                  ntree = cvresults_dawols[3])
+  bartmod0_c <-
+    wbart.cluster(x.train = dat[, c(1, 4:13)], y.train = dat$dawols90,
+                  x.test = dat0_weight[, c(1, 4:13)], nchains = 4,
+                  power = cvresults_dawols[1], base = cvresults_dawols[2],
+                  ntree = cvresults_dawols[3])
+  
+  # Collapse predictions across chains for certain calculations
+  bartmod1_c$yhat.test.collapse <- apply(bartmod1_c$yhat.test, 2, rbind)
+  bartmod0_c$yhat.test.collapse <- apply(bartmod0_c$yhat.test, 2, rbind)
+  
+  figdat2_weight$cate[i] <- mean(colMeans(bartmod1_c$yhat.test.collapse) -
+                                 colMeans(bartmod0_c$yhat.test.collapse))
+
+  figdat2_weight$cate_lower[i] <-
+    mean(apply(bartmod1_c$yhat.test.collapse - bartmod0_c$yhat.test.collapse,
+          2, quantile, probs = 0.025))
+  
+  figdat2_weight$cate_upper[i] <-
+    mean(apply(bartmod1_c$yhat.test.collapse - bartmod0_c$yhat.test.collapse,
+          2, quantile, probs = 0.975))
+    
+}
+
+# Make partial dependence plots
+figdat_dep <- rbind(figdat1_age, figdat2_age, figdat1_weight, figdat2_weight)
+fig2 <- ggplot(figdat_dep, aes(x = covar_val, y = cate)) +
+  facet_grid(covar_type~outcome, scales = "free") +
+  geom_smooth(aes(ymin = cate_lower, ymax = cate_upper), stat = "identity",
+              colour = "black") +
+  xlab("Participant indexed by effect size") + ylab("Average CATE") +
+  theme_bw() +
+  scale_fill_grey()
+
+# Output as PDF
+pdf(file = "fig2.pdf")
+fig2
+dev.off()
 ```
 
 
