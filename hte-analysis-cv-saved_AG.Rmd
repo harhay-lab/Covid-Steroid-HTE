@@ -19,7 +19,7 @@ source("clusterfunctions.R")
 
 # Load data from appropriate directory (edit as needed)
 dat <- read.csv2("L:/LovbeskyttetMapper/Covid-Steroid/COVID-STEROID-2/Finale analyser/Data output/Dataset subset for BART HTE project v2.csv") #AG, real data
-#dat <- read.csv2("~/Downloads/synth_covid.csv") # Bryan, synthetic data # Bryan, synthetic data
+#dat <- read.csv("./Synth_Data/synth_covid.csv") # Bryan, synthetic data # Bryan, synthetic data
 ```
 
 Next we do a small amount of data cleaning/preparation.
@@ -508,6 +508,19 @@ text(c(1, 1), c(-4.417, 4.417), pos=2, cex=0.6, labels='0.99999')
 ```
 
 If several points lie beyond the dark blue line or further, consider using more thinning when fitting the models.
+
+## Additional Tables/Figures
+
+Next we create some additional figures and a table for the paper
+
+### Treatment effect plot
+
+```{r}
+
+```
+
+
+### Table
 
 ## Sensitivity analysis
 
