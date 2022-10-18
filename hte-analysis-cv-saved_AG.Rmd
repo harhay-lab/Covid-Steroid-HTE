@@ -160,6 +160,23 @@ dat$cate <-
     (1 + exp(colMeans(bartmod1$yhat.test.collapse))) -
   exp(colMeans(bartmod0$yhat.test.collapse)) /
     (1 + exp(colMeans(bartmod0$yhat.test.collapse)))
+
+figdat1 <- data.frame(cate = dat$cate)
+figdat1$outcome <- "Mortality"
+
+figdat1$cate_lower <-
+  apply(exp(bartmod1$yhat.test.collapse) /
+          (1 + exp(bartmod1$yhat.test.collapse)) -
+        exp(bartmod0$yhat.test.collapse) /
+          (1 + exp(bartmod0$yhat.test.collapse)),
+        2, quantile, probs = 0.025)
+
+figdat1$cate_upper <-
+  apply(exp(bartmod1$yhat.test.collapse) /
+          (1 + exp(bartmod1$yhat.test.collapse)) -
+        exp(bartmod0$yhat.test.collapse) /
+          (1 + exp(bartmod0$yhat.test.collapse)),
+        2, quantile, probs = 0.975)
 ```
 
 This full process is then repeated for the continuous outcome (days alive without life support by day 90).
@@ -238,6 +255,17 @@ bartmod0_c$yhat.test.collapse <- apply(bartmod0_c$yhat.test, 2, rbind)
 # Estimate CATEs
 dat$cate_c <- colMeans(bartmod1_c$yhat.test.collapse) -
               colMeans(bartmod0_c$yhat.test.collapse)
+
+figdat2 <- data.frame(cate = dat$cate_c)
+figdat2$outcome <- "DAWOLS"
+
+figdat2$cate_lower <-
+  apply(bartmod1_c$yhat.test.collapse - bartmod0_c$yhat.test.collapse,
+        2, quantile, probs = 0.025)
+
+figdat2$cate_upper <-
+  apply(bartmod1_c$yhat.test.collapse - bartmod0_c$yhat.test.collapse,
+        2, quantile, probs = 0.975)
 ```
 
 Print the chosen hyperparameters here for future reference:
@@ -516,6 +544,53 @@ Next we create some additional figures and a table for the paper
 ### Treatment effect plot
 
 ```{r}
+figdat1 <- figdat1[order(figdat1$cate, decreasing = TRUE), ]
+figdat1$index <- 1:nrow(figdat1)
+figdat2 <- figdat2[order(figdat2$cate, decreasing = FALSE), ]
+figdat2$index <- 1:nrow(figdat2)
+figdat <- rbind(figdat1, figdat2)
+
+fig3 <- ggplot(figdat, aes(x = index, y = cate)) +
+  facet_wrap(~outcome, scales = "free") +
+  geom_smooth(aes(ymin = cate_lower, ymax = cate_upper), stat = "identity",
+              colour = "black") +
+  xlab("Participant indexed by effect size") + ylab("CATE") +
+  theme_bw() +
+  scale_fill_grey()
+
+# Output as PDF
+pdf(file = "fig3.pdf")
+fig3
+dev.off()
+```
+
+### Partial dependence plots
+
+```{r}
+age_list <- seq(-2.8, 1.8, by = 0.2)
+weight_list <- seq(-1.8, 3.6, by = 0.2)
+
+for (i in 1:length(age_list)) {
+  
+  dat1_age <- dat1
+  dat1_age$Age <- age_list[i]
+  dat0_age <- dat0
+  dat0_age$Age <- age_list[i]
+  
+  set.seed(60622)
+  bartmod1 <-
+    lbart.cluster(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
+                  x.test = dat1_age[, c(1, 4:13)], nchains = 4,
+                  power = cvresults_mort[1], base = cvresults_mort[2],
+                  ntree = cvresults_mort[3])
+  bartmod0 <-
+    lbart.cluster(x.train = dat[, c(1, 4:13)], y.train = dat$dead90,
+                  x.test = dat0_age[, c(1, 4:13)], nchains = 4,
+                  power = cvresults_mort[1], base = cvresults_mort[2],
+                  ntree = cvresults_mort[3])
+  
+}
+
 
 ```
 
@@ -543,7 +618,7 @@ source("clusterfunctions.R")
 
 # Load data from appropriate directory (edit as needed)
 dat <- read.csv2("L:/LovbeskyttetMapper/Covid-Steroid/COVID-STEROID-2/Finale analyser/Data output/Dataset subset for BART HTE project v2.csv") #AG, real data
-#dat <- read.csv2("~/Downloads/synth_covid.csv") # Bryan, synthetic data # Bryan, synthetic data
+#dat <- read.csv("./Synth_Data/synth_covid.csv") # Bryan, synthetic data # Bryan, synthetic data
 ```
 
 Next we do a small amount of data cleaning/preparation.
