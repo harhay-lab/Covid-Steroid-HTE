@@ -3,6 +3,8 @@ title: 'COVID STEROID 2: HTE Analysis'
 output: word_document
 ---
 
+2022-10-28 Update AG: Moved the tabulation of steroids for more than two days/allocation to the top, as the dataset isn't loaded anymore in the place the code was previously inserted. No other changes.
+
 2022-09-14 Update AG: changed path to the real dataset (updated to include BW/WB variables), and added coded to change order of columns (to avoid problems as columns are selected by position and the dawols90_bestworst/worstbest variables are added before the predictors in the new dataset), finally similarly changed numbers in variable selection in rpart calls (due to the added vars), changed typo in line 633
 
 ## Analysis
@@ -18,11 +20,21 @@ library(rpart.plot)
 library(flextable)
 library(officer)
 library(ggplot2)
+library(dplyr)
+library(ggh4x)
 source("clusterfunctions.R")
 
 # Load data from appropriate directory (edit as needed)
 dat <- read.csv2("L:/LovbeskyttetMapper/Covid-Steroid/COVID-STEROID-2/Finale analyser/Data output/Dataset subset for BART HTE project v2.csv") #AG, real data
 #dat <- read.csv("./Synth_Data/synth_covid.csv") # Bryan, synthetic data # Bryan, synthetic data
+```
+
+### Summary statistics table
+
+We already have these from Tables 1 and 2 of the primary paper, just need to add a summary for one more covariate.
+
+```{r}
+table(dat$corticosteroids_before_more_than_2days, dat$allocation)
 ```
 
 Next we do a small amount of data cleaning/preparation.
@@ -309,6 +321,17 @@ cartmod <- rpart(cate ~ ., data = dat[, c(4:13, 18)], method = "anova",
                  maxdepth = 3)
 rpart.plot(cartmod)
 
+table(cartmod$where)
+for (i in 1:length(table(cartmod$where))) {
+  print(i)
+  print(mean(dat[which(cartmod$where == names(table(cartmod$where))[i]),
+                 'cate']))
+  print(quantile(dat[which(cartmod$where == names(table(cartmod$where))[i]),
+                 'cate'], 0.025))
+  print(quantile(dat[which(cartmod$where == names(table(cartmod$where))[i]),
+                 'cate'], 0.975))
+}
+
 # Output as PDF
 pdf(file = "fig4.pdf")
 rpart.plot(cartmod, yesno = 2)
@@ -330,6 +353,17 @@ Now we prune the tree for interpretability using a maximum depth of 3 nodes.
 cartmod <- rpart(cate_c ~ ., data = dat[, c(4:13, 19)], method = "anova",
                  maxdepth = 3)
 rpart.plot(cartmod)
+
+table(cartmod$where)
+for (i in 1:length(table(cartmod$where))) {
+  print(i)
+  print(mean(dat[which(cartmod$where == names(table(cartmod$where))[i]),
+                 'cate_c']))
+  print(quantile(dat[which(cartmod$where == names(table(cartmod$where))[i]),
+                 'cate_c'], 0.025))
+  print(quantile(dat[which(cartmod$where == names(table(cartmod$where))[i]),
+                 'cate_c'], 0.975))
+}
 
 # Output as PDF
 pdf(file = "fig3.pdf")
@@ -556,7 +590,9 @@ If several points lie beyond the dark blue line or further, consider using more 
 
 ## Additional Tables/Figures
 
-Next we create some additional figures and a table for the paper
+Next we create some additional figures and tables for the paper. W
+
+
 
 ### Treatment effect plot
 
@@ -567,16 +603,29 @@ figdat2 <- figdat2[order(figdat2$cate, decreasing = FALSE), ]
 figdat2$index <- 1:nrow(figdat2)
 figdat <- rbind(figdat1, figdat2)
 
+scales_y <- list(
+  `DAWOLS` = scale_y_continuous(breaks = seq(-20, 20, 5)),
+  `Mortality` = scale_y_continuous(breaks = seq(-0.35, 0.25, 0.1))
+)
+
 fig1 <- ggplot(figdat, aes(x = index, y = cate)) +
   facet_wrap(~outcome, scales = "free") +
+  #facet_grid_sc(columns = vars(outcome)) +
   geom_smooth(aes(ymin = cate_lower, ymax = cate_upper), stat = "identity",
               colour = "black") +
+  geom_hline(yintercept = 0, lty = 3) +
   xlab("Participant indexed by effect size") + ylab("CATE") +
   theme_bw() +
-  scale_fill_grey()
+  scale_fill_grey() +
+  ggh4x::facetted_pos_scales(y = list(
+  outcome == "Mortality" ~ scale_y_continuous(breaks = round(seq(-0.3, 0.2,
+                                                                 0.1), 1),
+                                              limits = c(-0.33, 0.26)),
+  outcome == "DAWOLS" ~ scale_y_continuous(breaks = seq(-25, 25, 5),
+                                           limits = c(-26, 26))))
 
 # Output as PDF
-pdf(file = "fig1.pdf")
+pdf(file = "newfig1.pdf")
 fig1
 dev.off()
 ```
@@ -695,8 +744,14 @@ tabledat <-
                                       0.975), 1),
                        ")", sep = "")))
 
-ft <- flextable(tabledat)
+ft <- flextable(tabledat) %>%
+  theme_zebra()
 
+# Export table to Word
+read_docx() %>% 
+  body_add_par("Treatment Effects by Quartile Table") %>% 
+  body_add_flextable(value = ft) %>% 
+  print(target = "treatment_effect_table.docx")
 ```
 
 
@@ -705,7 +760,7 @@ ft <- flextable(tabledat)
 ```{r}
 # Age and weight grids to be evaluated
 age_list <- seq(-2.8, 1.8, length.out = 10)
-weight_list <- seq(-1.8, 3.6, length.out = 10)
+weight_list <- seq(-1.5, 3.5, length.out = 10)
 
 # Make data frames for each figure panel
 figdat1_age <- data.frame("covar_val" = age_list)
@@ -727,7 +782,7 @@ figdat2_weight$cate <- figdat2_weight$cate_lower <-
   figdat2_weight$cate_upper <- NA
 
 # First get estimates across age covariate
-for (i in 8:length(age_list)) {
+for (i in 1:length(age_list)) {
   
   dat1_age <- dat1
   dat1_age$age <- age_list[i]
@@ -879,28 +934,27 @@ for (i in 1:length(weight_list)) {
 }
 
 # Make partial dependence plots
+figdat1_age$covar_val <- figdat1_age$covar_val * age_sd + age_mean
+figdat2_age$covar_val <- figdat2_age$covar_val * age_sd + age_mean
+figdat1_weight$covar_val <- figdat1_weight$covar_val * weight_sd + weight_mean
+figdat2_weight$covar_val <- figdat2_weight$covar_val * weight_sd + weight_mean
+
 figdat_dep <- rbind(figdat1_age, figdat2_age, figdat1_weight, figdat2_weight)
-figdat_dep$covar_val[covar_type == "Age"] <-
-  figdat_dep$covar_val[covar_type == "Age"] * age_sd + age_mean
-figdat_dep$covar_val[covar_type == "Weight"] <-
-  figdat_dep$covar_val[covar_type == "Weight"] * weight_sd + weight_mean
 
 fig2 <- ggplot(figdat_dep, aes(x = covar_val, y = cate)) +
   facet_wrap(~covar_type, scales = "free") +
   geom_smooth(aes(ymin = cate_lower, ymax = cate_upper), stat = "identity",
               colour = "black") +
-  xlab("Participant indexed by effect size") + ylab("Average CATE") +
+  xlab("Top row: Age in years            Bottom row: Weight in kg") + ylab("Average CATE") +
   theme_bw() +
   scale_fill_grey()
 
 # Output as PDF
-pdf(file = "fig2.pdf")
+pdf(file = "newfig2.pdf")
 fig2
 dev.off()
 ```
 
-
-### Table
 
 ## Sensitivity analysis
 
@@ -1079,6 +1133,17 @@ cartmod <- rpart(cate ~ ., data = dat[, c(4:13, 18)], method = "anova",
                  maxdepth = 3)
 rpart.plot(cartmod)
 
+table(cartmod$where)
+for (i in 1:length(table(cartmod$where))) {
+  print(i)
+  print(mean(dat[which(cartmod$where == names(table(cartmod$where))[i]),
+                 'cate']))
+  print(quantile(dat[which(cartmod$where == names(table(cartmod$where))[i]),
+                 'cate'], 0.025))
+  print(quantile(dat[which(cartmod$where == names(table(cartmod$where))[i]),
+                 'cate'], 0.975))
+}
+
 # Output as PDF
 pdf(file = "suppfig2.pdf")
 rpart.plot(cartmod, yesno = 2)
@@ -1100,6 +1165,17 @@ Now we prune the tree for interpretability using a maximum depth of 3 nodes.
 cartmod <- rpart(cate_c ~ ., data = dat[, c(4:13, 19)], method = "anova",
                  maxdepth = 3)
 rpart.plot(cartmod)
+
+table(cartmod$where)
+for (i in 1:length(table(cartmod$where))) {
+  print(i)
+  print(mean(dat[which(cartmod$where == names(table(cartmod$where))[i]),
+                 'cate_c']))
+  print(quantile(dat[which(cartmod$where == names(table(cartmod$where))[i]),
+                 'cate_c'], 0.025))
+  print(quantile(dat[which(cartmod$where == names(table(cartmod$where))[i]),
+                 'cate_c'], 0.975))
+}
 
 # Output as PDF
 pdf(file = "suppfig1.pdf")
@@ -1277,6 +1353,17 @@ cartmod <- rpart(cate ~ ., data = dat[, c(4:13, 18)], method = "anova",
                  maxdepth = 3)
 rpart.plot(cartmod)
 
+table(cartmod$where)
+for (i in 1:length(table(cartmod$where))) {
+  print(i)
+  print(mean(dat[which(cartmod$where == names(table(cartmod$where))[i]),
+                 'cate']))
+  print(quantile(dat[which(cartmod$where == names(table(cartmod$where))[i]),
+                 'cate'], 0.025))
+  print(quantile(dat[which(cartmod$where == names(table(cartmod$where))[i]),
+                 'cate'], 0.975))
+}
+
 # Output as PDF
 pdf(file = "suppfig4.pdf")
 rpart.plot(cartmod, yesno = 2)
@@ -1298,6 +1385,17 @@ Now we prune the tree for interpretability using a maximum depth of 3 nodes.
 cartmod <- rpart(cate_c ~ ., data = dat[, c(4:13, 19)], method = "anova",
                  maxdepth = 3)
 rpart.plot(cartmod)
+
+table(cartmod$where)
+for (i in 1:length(table(cartmod$where))) {
+  print(i)
+  print(mean(dat[which(cartmod$where == names(table(cartmod$where))[i]),
+                 'cate_c']))
+  print(quantile(dat[which(cartmod$where == names(table(cartmod$where))[i]),
+                 'cate_c'], 0.025))
+  print(quantile(dat[which(cartmod$where == names(table(cartmod$where))[i]),
+                 'cate_c'], 0.975))
+}
 
 # Output as PDF
 pdf(file = "suppfig3.pdf")
