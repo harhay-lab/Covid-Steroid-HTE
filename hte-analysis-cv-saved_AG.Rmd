@@ -590,9 +590,7 @@ If several points lie beyond the dark blue line or further, consider using more 
 
 ## Additional Tables/Figures
 
-Next we create some additional figures and tables for the paper. W
-
-
+Next we create some additional figures and tables for the paper.
 
 ### Treatment effect plot
 
