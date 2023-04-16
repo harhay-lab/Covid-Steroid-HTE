@@ -24,8 +24,7 @@ library(rpart.plot)
 source("clusterfunctions.R")
 
 # Load data from appropriate directory (edit as needed)
-dat <- read.csv2("L:/LovbeskyttetMapper/Covid-Steroid/COVID-STEROID-2/Finale analyser/Data output/Dataset subset for BART HTE project.csv") #AG, real data
-#dat <- read.csv2("~/Downloads/synth_covid.csv") # Bryan, synthetic data # Bryan, synthetic data
+dat <- read.csv2("~/Downloads/synth_covid.csv") # Bryan, synthetic data, real stored non-locally
 ```
 
 Next we do a small amount of data cleaning/preparation.
